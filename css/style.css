@@ -448,7 +448,40 @@ h6 {
     align-items: center;
 }
 
-/* Summary item */
+/* Spreadsheet View */
+.spreadsheet-panel {
+    display: flex;
+    flex-direction: column;
+}
+
+.spreadsheet-panel .panel-header {
+    margin-bottom: 2rem;
+}
+
+.spreadsheet-panel .header-main h3 {
+    margin-bottom: 0.25rem;
+}
+
+.spreadsheet-panel .header-main p {
+    font-size: 0.9rem;
+}
+
+.spreadsheet-actions {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+}
+
+.spreadsheet-container {
+    width: 100%;
+    height: 600px;
+    background: white;
+    border-radius: 8px;
+    overflow: hidden;
+    margin-top: 1rem;
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
 .summary-item {
     font-size: 1.2rem;
     font-weight: 600;

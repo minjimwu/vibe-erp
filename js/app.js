@@ -51,6 +51,7 @@ const app = {
             'suppliers': '進貨廠商 Suppliers',
             'customers': '客戶資料 Customers',
             'reports': '銷售報表 Reports',
+            'spreadsheet': '批次編輯 Spreadsheet',
             'settings': '系統資料 Settings'
         };
         document.getElementById('page-title').innerText = titles[view] || 'Vibe ERP';
@@ -83,6 +84,7 @@ const app = {
                 case 'suppliers': await this.renderSuppliers(); break;
                 case 'customers': await this.renderCustomers(); break;
                 case 'reports': await this.renderReports(); break;
+                case 'spreadsheet': await this.renderSpreadsheet(); break;
             }
         } catch (e) {
             console.error("Error loading view data:", e);
@@ -245,47 +247,91 @@ const app = {
     },
 
     async renderReports() {
-        const customers = await DB.getAll('customers');
-        const sales = await DB.getAll('sales');
+        // ... (現有的 renderReports 內容不變)
+    },
 
-        const select = document.getElementById('report-customer-select');
-        select.innerHTML = '<option value="">所有客戶</option>' + customers.map(c => `<option value="${c.id}">${c.name} (${c.id})</option>`).join('');
+    // --- Spreadsheet Logic (Handsontable integration) ---
+    hot: null,
+    async renderSpreadsheet() {
+        const tableSelect = document.getElementById('spreadsheet-select-table');
+        const saveBtn = document.getElementById('btn-spreadsheet-save');
+        const refreshBtn = document.getElementById('btn-spreadsheet-refresh');
+        const gridDiv = document.getElementById('spreadsheet-grid');
 
-        const renderTable = (filterCustomerId) => {
-            const filteredSales = filterCustomerId ? sales.filter(s => s.customer_id == filterCustomerId) : sales;
-            const tbody = document.getElementById('reports-tbody');
+        const loadGrid = async () => {
+            const tableName = tableSelect.value;
+            const data = await DB.getAll(tableName);
 
-            if (!filteredSales.length) {
-                tbody.innerHTML = '<tr><td colspan="7" class="text-center">查無資料。</td></tr>';
-                document.getElementById('report-total').innerText = '$0';
-                return;
+            let columns = [];
+            let headers = [];
+
+            if (tableName === 'products') {
+                columns = [
+                    { data: 'id', type: 'text' },
+                    { data: 'name', type: 'text' },
+                    { data: 'category', type: 'text' },
+                    { data: 'cost', type: 'numeric' },
+                    { data: 'price', type: 'numeric' },
+                    { data: 'stock', type: 'numeric' },
+                    { data: 'supplier_id', type: 'text' }
+                ];
+                headers = ["產品代碼", "產品名稱", "產品類別", "進貨成本", "預計售價", "庫存量", "供應商ID"];
+            } else if (tableName === 'suppliers') {
+                columns = [
+                    { data: 'id' }, { data: 'name' }, { data: 'contact' }, { data: 'phone' }
+                ];
+                headers = ["廠商編號", "廠商名稱", "聯絡人", "電話"];
+            } else if (tableName === 'customers') {
+                columns = [
+                    { data: 'id' }, { data: 'name' }, { data: 'phone' }, { data: 'address' }
+                ];
+                headers = ["客戶編號", "客戶名稱", "電話", "地址"];
             }
 
-            let total = 0;
-            tbody.innerHTML = filteredSales.map(item => {
-                total += Number(item.total || 0);
-                const cName = customers.find(c => c.id == item.customer_id)?.name || item.customer_id;
-                return `
-                    <tr>
-                        <td>${item.id || ''}</td>
-                        <td>${item.date || ''}</td>
-                        <td>${cName}</td>
-                        <td>${item.product_id || ''}</td>
-                        <td>$${item.price || 0}</td>
-                        <td>${item.qty || 0}</td>
-                        <td>$${Number(item.total || 0).toLocaleString()}</td>
-                    </tr>
-                `;
-            }).join('');
+            if (this.hot) {
+                this.hot.destroy();
+            }
 
-            document.getElementById('report-total').innerText = '$' + total.toLocaleString();
+            this.hot = new Handsontable(gridDiv, {
+                data: data,
+                columns: columns,
+                colHeaders: headers,
+                rowHeaders: true,
+                stretchH: 'all',
+                height: 500,
+                autoWrapRow: true,
+                autoWrapCol: true,
+                licenseKey: 'non-commercial-and-evaluation', // For evaluation use
+                contextMenu: true,
+                filters: true,
+                dropdownMenu: true,
+                minSpareRows: 1, // Allow adding new rows by clicking below
+                manualColumnResize: true,
+                copyPaste: true, // Crucial for user requirements
+            });
         };
 
-        renderTable('');
+        tableSelect.addEventListener('change', () => loadGrid());
+        refreshBtn.addEventListener('click', () => loadGrid());
 
-        select.addEventListener('change', (e) => {
-            renderTable(e.target.value);
+        saveBtn.addEventListener('click', async () => {
+            const updatedData = this.hot.getSourceData();
+            const tableName = tableSelect.value;
+
+            try {
+                // Filter out empty rows (where ID is missing)
+                const finalData = updatedData.filter(row => row.id && row.id.toString().trim() !== '');
+
+                await DB.bulkInsert(tableName, finalData);
+                this.showToast('批次更新成功');
+                await loadGrid();
+            } catch (err) {
+                console.error(err);
+                this.showToast('更新失敗，請確認資料格式與 ID 是否重複');
+            }
         });
+
+        await loadGrid();
     },
 
     // --- Excel Functionality ---
