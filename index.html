@@ -189,6 +189,7 @@
                     </tbody>
                 </table>
             </div>
+            <div id="purchases-pagination" class="panel-footer"></div>
         </div>
     </template>
 
@@ -220,6 +221,7 @@
                     </tbody>
                 </table>
             </div>
+            <div id="sales-pagination" class="panel-footer"></div>
         </div>
     </template>
 
@@ -356,11 +358,27 @@
         </div>
     </div>
 
+    <!-- Dialog Modal (Alert/Confirm) -->
+    <div id="dialog-container" class="modal-overlay" style="display: none; z-index: 2000;">
+        <div class="modal glass-panel" style="max-width: 400px;">
+            <div class="modal-header">
+                <h3 id="dialog-title">提示</h3>
+                <button class="icon-btn" onclick="app.closeDialog(false)"><i class="ph ph-x"></i></button>
+            </div>
+            <div class="modal-body" id="dialog-body"></div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" id="dialog-cancel-btn" onclick="app.closeDialog(false)">取消</button>
+                <button class="btn btn-primary" id="dialog-ok-btn" onclick="app.closeDialog(true)">確定</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Toast Notification -->
     <div id="toast" class="toast">操作成功</div>
 
     <!-- App Logic -->
     <script src="js/db.js"></script>
+    <script src="js/sample-data.js"></script>
     <script src="js/app.js"></script>
 </body>
 
