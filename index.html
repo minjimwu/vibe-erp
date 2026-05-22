@@ -147,13 +147,14 @@
                             <th>進貨成本</th>
                             <th>預計售價</th>
                             <th>庫存量</th>
+                            <th>單位</th>
                             <th>供應商</th>
                             <th>操作</th>
                         </tr>
                     </thead>
                     <tbody id="products-tbody">
                         <tr>
-                            <td colspan="7" class="text-center">載入中...</td>
+                            <td colspan="9" class="text-center">載入中...</td>
                         </tr>
                     </tbody>
                 </table>
@@ -235,9 +236,11 @@
                     <thead>
                         <tr>
                             <th>廠商編號</th>
-                            <th>廠商名稱</th>
+                            <th>廠商名稱（簡稱）</th>
+                            <th>廠商全名</th>
                             <th>聯絡人</th>
-                            <th>電話</th>
+                            <th>電話／手機</th>
+                            <th>Email</th>
                         </tr>
                     </thead>
                     <tbody id="suppliers-tbody">
@@ -260,6 +263,8 @@
                             <th>客戶名稱</th>
                             <th>電話</th>
                             <th>地址</th>
+                            <th>服務員</th>
+                            <th>電子郵件</th>
                         </tr>
                     </thead>
                     <tbody id="customers-tbody">
@@ -331,6 +336,9 @@
             <p><strong>請定期使用右上角的「匯出本機資料」備份您的資料，以免因為清除瀏覽器快取而遺失資料。</strong></p>
             <p>如果您要更換電腦，請先在新設備上下載範本，用您備份的資料貼上並匯入系統中即可還原。</p>
 
+            <!-- 舊系統資料一鍵匯入區塊 -->
+            <div id="settings-import-container"></div>
+
             <div class="danger-zone"
                 style="margin-top: 30px; border: 1px solid #ef4444; padding: 20px; border-radius: 8px;">
                 <h4 style="color: #ef4444; margin-top: 0;">危險操作</h4>
@@ -379,6 +387,7 @@
     <!-- App Logic -->
     <script src="js/db.js"></script>
     <script src="js/sample-data.js"></script>
+    <script src="js/converted-data.js"></script>
     <script src="js/app.js"></script>
 </body>
 

@@ -2,12 +2,12 @@
 const db = new Dexie('VibeERP');
 
 // Define database schema
-db.version(2).stores({
-    products: 'id, name, category, cost, price, stock, supplier_id', // 產品代碼, 產品名稱, 產品類別, 進貨成本, 預計售價, 庫存量, 供應商
-    suppliers: 'id, name, contact, phone', // 廠商編號, 廠商名稱, 聯絡人, 電話
-    customers: 'id, name, phone, address', // 客戶編號, 客戶名稱, 電話, 地址
+db.version(3).stores({
+    products: 'id, name, category, cost, price, stock, unit, supplier_id', // 產品代碼, 名稱, 類別, 成本, 售價, 庫存, 單位, 供應商
+    suppliers: 'id, name, full_name, contact, phone, mobile, tax_id, email, fax, zip_code, address, remark', // 廠商資料（含擴充欄位）
+    customers: 'id, name, phone, address, english_name, salesperson, birthday, gender, email, tax_id, invoice_title, vip_card, member_card, store_value_id, customer_type, fax, zip_code, remarks', // 客戶資料（含擴充欄位）
     purchases: 'id, date, supplier_id, product_id, cost, qty, total', // 進貨單
-    sales: 'id, date, customer_id, product_id, price, qty, total' // 出貨單
+    sales: 'id, date, customer_id, product_id, price, qty, total, employee, discount, shipping, cost, profit, tax, net_total, original_order_id' // 出貨單（含業績報表擴充欄位）
 });
 
 // Utility DB wrapper

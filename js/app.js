@@ -87,6 +87,7 @@ const app = {
                 case 'customers': await this.renderCustomers(); break;
                 case 'reports': await this.renderReports(); break;
                 case 'spreadsheet': await this.renderSpreadsheet(); break;
+                case 'settings': await this.renderSettings(); break;
             }
         } catch (e) {
             console.error("Error loading view data:", e);
@@ -156,7 +157,7 @@ const app = {
         const data = await DB.getAll('products');
         const tbody = document.getElementById('products-tbody');
         if (!data.length) {
-            tbody.innerHTML = '<tr><td colspan="7" class="text-center">尚無資料，請先新增或匯入 Excel 檔案。</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="9" class="text-center">尚無資料，請先新增或匯入 Excel 檔案。</td></tr>';
             return;
         }
 
@@ -167,7 +168,8 @@ const app = {
                 <td><span class="category-badge">${item.category || ''}</span></td>
                 <td>$${Number(item.cost || 0).toLocaleString()}</td>
                 <td>$${Number(item.price || 0).toLocaleString()}</td>
-                <td><span style="color: ${item.stock < 10 ? 'red' : 'inherit'}">${item.stock || 0}</span></td>
+                <td><span style="color: ${Number(item.stock) < 10 ? 'var(--danger)' : 'inherit'}">${item.stock || 0}</span></td>
+                <td>${item.unit || ''}</td>
                 <td>${item.supplier_id || ''}</td>
                 <td><button class="btn btn-sm btn-outline" onclick="app.deleteRecord('products', '${item.id}')">刪除</button></td>
             </tr>
@@ -283,15 +285,17 @@ const app = {
         const data = await DB.getAll('suppliers');
         const tbody = document.getElementById('suppliers-tbody');
         if (!data.length) {
-            tbody.innerHTML = '<tr><td colspan="4" class="text-center">尚無廠商資料。</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="6" class="text-center">尚無廠商資料。</td></tr>';
             return;
         }
         tbody.innerHTML = data.map(item => `
             <tr>
                 <td>${item.id || ''}</td>
                 <td><strong>${item.name || ''}</strong></td>
+                <td class="text-muted" style="font-size:0.85em">${item.full_name || ''}</td>
                 <td>${item.contact || ''}</td>
-                <td>${item.phone || ''}</td>
+                <td>${item.phone || item.mobile || ''}</td>
+                <td>${item.email || ''}</td>
             </tr>
         `).join('');
     },
@@ -300,15 +304,20 @@ const app = {
         const data = await DB.getAll('customers');
         const tbody = document.getElementById('customers-tbody');
         if (!data.length) {
-            tbody.innerHTML = '<tr><td colspan="4" class="text-center">尚無客戶資料。</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="6" class="text-center">尚無客戶資料。</td></tr>';
             return;
         }
         tbody.innerHTML = data.map(item => `
             <tr>
                 <td>${item.id || ''}</td>
-                <td><strong>${item.name || ''}</strong></td>
+                <td>
+                    <strong>${item.name || ''}</strong>
+                    ${item.english_name ? `<span class="text-muted" style="font-size:0.82em;display:block">${item.english_name}</span>` : ''}
+                </td>
                 <td>${item.phone || ''}</td>
                 <td>${item.address || ''}</td>
+                <td>${item.salesperson || ''}</td>
+                <td>${item.email || ''}</td>
             </tr>
         `).join('');
     },
@@ -384,19 +393,30 @@ const app = {
                     { data: 'cost', type: 'numeric' },
                     { data: 'price', type: 'numeric' },
                     { data: 'stock', type: 'numeric' },
+                    { data: 'unit', type: 'text' },
                     { data: 'supplier_id', type: 'text' }
                 ];
-                headers = ["產品代碼", "產品名稱", "產品類別", "進貨成本", "預計售價", "庫存量", "供應商ID"];
+                headers = ["產品代碼", "產品名稱", "產品類別", "進貨成本", "預計售價", "庫存量", "單位", "供應商ID"];
             } else if (tableName === 'suppliers') {
                 columns = [
-                    { data: 'id' }, { data: 'name' }, { data: 'contact' }, { data: 'phone' }
+                    { data: 'id' }, { data: 'name' }, { data: 'full_name' },
+                    { data: 'contact' }, { data: 'phone' }, { data: 'mobile' },
+                    { data: 'tax_id' }, { data: 'email' }, { data: 'fax' },
+                    { data: 'zip_code' }, { data: 'address' }, { data: 'remark' }
                 ];
-                headers = ["廠商編號", "廠商名稱", "聯絡人", "電話"];
+                headers = ["廠商編號", "廠商名稱", "廠商全名", "聯絡人", "電話", "手機", "統一編號", "Email", "傳真", "郵遞區號", "地址", "備註"];
             } else if (tableName === 'customers') {
                 columns = [
-                    { data: 'id' }, { data: 'name' }, { data: 'phone' }, { data: 'address' }
+                    { data: 'id' }, { data: 'name' }, { data: 'phone' }, { data: 'address' },
+                    { data: 'english_name' }, { data: 'salesperson' }, { data: 'birthday' },
+                    { data: 'gender' }, { data: 'email' }, { data: 'tax_id' },
+                    { data: 'invoice_title' }, { data: 'vip_card' }, { data: 'member_card' },
+                    { data: 'store_value_id' }, { data: 'customer_type' }, { data: 'fax' },
+                    { data: 'zip_code' }, { data: 'remarks' }
                 ];
-                headers = ["客戶編號", "客戶名稱", "電話", "地址"];
+                headers = ["客戶編號", "客戶名稱", "電話", "地址", "英文姓名", "服務員", "生日",
+                    "性別", "電子郵件", "統一編號", "發票抬頭", "貴賓卡號", "會員卡號",
+                    "儲值號碼", "身份類別", "傳真", "郵遞區號", "備註"];
             }
 
             if (this.hot) {
@@ -473,18 +493,42 @@ const app = {
             const data = await DB.getAll(tableName);
             const aoa = [Object.values(mapping)]; // Headers
             data.forEach(item => {
-                const row = Object.keys(mapping).map(k => item[k] || '');
+                const row = Object.keys(mapping).map(k => item[k] !== undefined ? item[k] : '');
                 aoa.push(row);
             });
             const ws = XLSX.utils.aoa_to_sheet(aoa);
             XLSX.utils.book_append_sheet(wb, ws, sheetName);
         };
 
-        await mapToSheet('products', '商品庫存', { id: "產品代碼", name: "產品名稱", category: "產品類別", cost: "進貨成本", price: "預計售價", stock: "庫存量", supplier_id: "供應商ID" });
-        await mapToSheet('suppliers', '進貨廠商', { id: "廠商編號", name: "廠商名稱", contact: "聯絡人", phone: "電話" });
-        await mapToSheet('customers', '客戶資料', { id: "客戶編號", name: "客戶名稱", phone: "電話", address: "地址" });
-        await mapToSheet('purchases', '進貨紀錄', { id: "進貨單號", date: "日期", supplier_id: "廠商編號", product_id: "產品代碼", cost: "單位成本", qty: "數量", total: "總金額" });
-        await mapToSheet('sales', '出貨紀錄', { id: "出貨單號", date: "日期", customer_id: "客戶編號", product_id: "產品代碼", price: "售價單價", qty: "數量", total: "總金額" });
+        await mapToSheet('products', '商品庫存', {
+            id: "產品代碼", name: "產品名稱", category: "產品類別",
+            cost: "進貨成本", price: "預計售價", stock: "庫存量",
+            unit: "單位", supplier_id: "供應商ID"
+        });
+        await mapToSheet('suppliers', '進貨廠商', {
+            id: "廠商編號", name: "廠商名稱", full_name: "廠商全名",
+            contact: "聯絡人", tax_id: "統一編號", phone: "電話",
+            mobile: "手機", fax: "傳真", zip_code: "郵遞區號",
+            address: "地址", remark: "備註", email: "Email"
+        });
+        await mapToSheet('customers', '客戶資料', {
+            id: "客戶編號", name: "客戶名稱", phone: "電話", address: "地址",
+            english_name: "英文姓名", salesperson: "服務員", birthday: "生日",
+            gender: "性別", email: "電子郵件", tax_id: "統一編號",
+            invoice_title: "發票抬頭", vip_card: "貴賓卡號", member_card: "會員卡號",
+            store_value_id: "儲值號碼", customer_type: "身份類別",
+            fax: "傳真", zip_code: "郵遞區號", remarks: "備註"
+        });
+        await mapToSheet('purchases', '進貨紀錄', {
+            id: "進貨單號", date: "日期", supplier_id: "廠商編號",
+            product_id: "產品代碼", cost: "單位成本", qty: "數量", total: "總金額"
+        });
+        await mapToSheet('sales', '出貨紀錄', {
+            id: "出貨單號", date: "日期", customer_id: "客戶編號",
+            product_id: "產品代碼", price: "售價單價", qty: "數量", total: "總金額",
+            employee: "打單人員", discount: "銷貨折扣", shipping: "運費收入",
+            cost: "商品成本", profit: "商品毛利", tax: "稅額", net_total: "商品總額"
+        });
 
         XLSX.writeFile(wb, `VibeERP_Backup_${new Date().toISOString().slice(0, 10)}.xlsx`);
         this.showToast("資料已匯出");
@@ -517,11 +561,35 @@ const app = {
                 };
 
                 await db.transaction('rw', db.products, db.suppliers, db.customers, db.purchases, db.sales, async () => {
-                    await processSheet('商品庫存', 'products', { id: "產品代碼", name: "產品名稱", category: "產品類別", cost: "進貨成本", price: "預計售價", stock: "庫存量", supplier_id: "供應商ID" });
-                    await processSheet('進貨廠商', 'suppliers', { id: "廠商編號", name: "廠商名稱", contact: "聯絡人", phone: "電話" });
-                    await processSheet('客戶資料', 'customers', { id: "客戶編號", name: "客戶名稱", phone: "電話", address: "地址" });
-                    await processSheet('進貨紀錄', 'purchases', { id: "進貨單號", date: "日期", supplier_id: "廠商編號", product_id: "產品代碼", cost: "單位成本", qty: "數量", total: "總金額" });
-                    await processSheet('出貨紀錄', 'sales', { id: "出貨單號", date: "日期", customer_id: "客戶編號", product_id: "產品代碼", price: "售價單價", qty: "數量", total: "總金額" });
+                    await processSheet('商品庫存', 'products', {
+                        id: "產品代碼", name: "產品名稱", category: "產品類別",
+                        cost: "進貨成本", price: "預計售價", stock: "庫存量",
+                        unit: "單位", supplier_id: "供應商ID"
+                    });
+                    await processSheet('進貨廠商', 'suppliers', {
+                        id: "廠商編號", name: "廠商名稱", full_name: "廠商全名",
+                        contact: "聯絡人", tax_id: "統一編號", phone: "電話",
+                        mobile: "手機", fax: "傳真", zip_code: "郵遞區號",
+                        address: "地址", remark: "備註", email: "Email"
+                    });
+                    await processSheet('客戶資料', 'customers', {
+                        id: "客戶編號", name: "客戶名稱", phone: "電話", address: "地址",
+                        english_name: "英文姓名", salesperson: "服務員", birthday: "生日",
+                        gender: "性別", email: "電子郵件", tax_id: "統一編號",
+                        invoice_title: "發票抬頭", vip_card: "貴賓卡號", member_card: "會員卡號",
+                        store_value_id: "儲值號碼", customer_type: "身份類別",
+                        fax: "傳真", zip_code: "郵遞區號", remarks: "備註"
+                    });
+                    await processSheet('進貨紀錄', 'purchases', {
+                        id: "進貨單號", date: "日期", supplier_id: "廠商編號",
+                        product_id: "產品代碼", cost: "單位成本", qty: "數量", total: "總金額"
+                    });
+                    await processSheet('出貨紀錄', 'sales', {
+                        id: "出貨單號", date: "日期", customer_id: "客戶編號",
+                        product_id: "產品代碼", price: "售價單價", qty: "數量", total: "總金額",
+                        employee: "打單人員", discount: "銷貨折扣", shipping: "運費收入",
+                        cost: "商品成本", profit: "商品毛利", tax: "稅額", net_total: "商品總額"
+                    });
                 });
 
                 this.showToast("資料匯入成功");
@@ -560,6 +628,81 @@ const app = {
         }
     },
 
+    // --- Settings 頁面渲染（含一鍵匯入舊資料） ---
+    async renderSettings() {
+        const container = document.getElementById('settings-import-container');
+        if (!container) return;
+
+        // 判斷是否已載入 converted-data.js
+        if (typeof ConvertedData === 'undefined') {
+            container.innerHTML = `
+                <div style="color: var(--text-muted); font-size: 0.9rem; margin-top: 12px;">
+                    <i class="ph ph-info"></i>
+                    若要一鍵匯入舊系統資料，請先在 index.html 中加入<br>
+                    <code style="background:rgba(0,0,0,0.05);padding:2px 6px;border-radius:4px;">&lt;script src="js/converted-data.js"&gt;&lt;/script&gt;</code>
+                    後重新整理頁面。
+                </div>`;
+            return;
+        }
+
+        const p = (ConvertedData.products || []).length;
+        const s = (ConvertedData.suppliers || []).length;
+        const c = (ConvertedData.customers || []).length;
+        const sa = (ConvertedData.sales || []).length;
+
+        container.innerHTML = `
+            <div class="converted-import-panel" style="margin-top:24px;padding:20px;border:1px solid rgba(79,70,229,0.3);border-radius:12px;background:rgba(79,70,229,0.04);">
+                <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+                    <i class="ph ph-file-xls" style="font-size:1.5rem;color:var(--primary);"></i>
+                    <h4 style="margin:0;color:var(--primary);">一鍵匯入舊系統資料</h4>
+                </div>
+                <p style="font-size:0.9rem;color:var(--text-muted);margin-bottom:16px;">
+                    已偵測到已轉換的舊系統資料：
+                    商品 <strong>${p}</strong> 筆、廠商 <strong>${s}</strong> 筆、
+                    客戶 <strong>${c}</strong> 筆、出貨紀錄 <strong>${sa}</strong> 筆。
+                </p>
+                <div style="display:flex;gap:10px;">
+                    <button class="btn btn-primary" id="btn-do-converted-import">
+                        <i class="ph ph-upload-simple"></i> 立即匯入
+                    </button>
+                    <button class="btn btn-outline" onclick="app.navigate('dashboard')">
+                        <i class="ph ph-chart-bar"></i> 匯入後查看總覽
+                    </button>
+                </div>
+                <div id="import-progress" style="margin-top:12px;font-size:0.85rem;color:var(--text-muted);"></div>
+            </div>`;
+
+        document.getElementById('btn-do-converted-import').onclick = async () => {
+            const btn = document.getElementById('btn-do-converted-import');
+            const progress = document.getElementById('import-progress');
+            btn.disabled = true;
+            btn.innerHTML = '<i class="ph ph-circle-notch ph-spin"></i> 匯入中...';
+
+            try {
+                progress.textContent = '正在寫入商品資料...';
+                await DB.bulkInsert('products', ConvertedData.products);
+
+                progress.textContent = '正在寫入廠商資料...';
+                await DB.bulkInsert('suppliers', ConvertedData.suppliers);
+
+                progress.textContent = '正在寫入客戶資料...';
+                await DB.bulkInsert('customers', ConvertedData.customers);
+
+                progress.textContent = '正在寫入出貨紀錄...';
+                await DB.bulkInsert('sales', ConvertedData.sales);
+
+                progress.innerHTML = '<span style="color:var(--secondary)"><i class="ph ph-check-circle"></i> 匯入成功！所有舊系統資料已寫入本系統。</span>';
+                btn.innerHTML = '<i class="ph ph-check"></i> 已匯入';
+                this.showToast('舊系統資料匯入成功！');
+            } catch (err) {
+                console.error(err);
+                progress.innerHTML = '<span style="color:var(--danger)">匯入發生錯誤，請查看 Console 詳細訊息。</span>';
+                btn.disabled = false;
+                btn.innerHTML = '<i class="ph ph-upload-simple"></i> 重試';
+            }
+        };
+    },
+
     // --- Modal Logic (Basic support for adding Product/Purchase/Sale) ---
     async showModal(type) {
         const overlay = document.getElementById('modal-container');
@@ -582,6 +725,8 @@ const app = {
                 <div class="form-group"><label>進貨成本</label><input type="number" id="m-cost" class="form-control"></div>
                 <div class="form-group"><label>預計售價</label><input type="number" id="m-price" class="form-control"></div>
                 <div class="form-group"><label>庫存量</label><input type="number" id="m-stock" class="form-control"></div>
+                <div class="form-group"><label>單位</label><input type="text" id="m-unit" class="form-control" placeholder="例：件、雙、個"></div>
+                <div class="form-group"><label>供應商ID</label><input type="text" id="m-supplier-id" class="form-control"></div>
             `;
             saveHandler = async () => {
                 await DB.save('products', {
@@ -591,7 +736,8 @@ const app = {
                     cost: document.getElementById('m-cost').value,
                     price: document.getElementById('m-price').value,
                     stock: document.getElementById('m-stock').value,
-                    supplier_id: ''
+                    unit: document.getElementById('m-unit').value,
+                    supplier_id: document.getElementById('m-supplier-id').value
                 });
                 return true;
             };
