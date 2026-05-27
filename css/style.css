@@ -352,6 +352,10 @@ h6 {
     animation: slideUp 0.3s ease-out;
 }
 
+.modal.modal-lg {
+    max-width: 750px;
+}
+
 .modal-header {
     display: flex;
     justify-content: space-between;

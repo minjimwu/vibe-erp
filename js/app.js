@@ -198,7 +198,7 @@ const app = {
 
         tbody.innerHTML = pageData.map(item => `
             <tr>
-                <td>${item.id || ''}</td>
+                <td>${(item.id || '').split('-')[0]}</td>
                 <td>${item.date || ''}</td>
                 <td>${item.supplier_id || ''}</td>
                 <td>${item.product_id || ''}</td>
@@ -230,8 +230,12 @@ const app = {
             return;
         }
 
-        // Sort by Date DESC
-        sales.sort((a, b) => new Date(b.date) - new Date(a.date));
+        // Sort by Date DESC, then by ID DESC if dates are equal
+        sales.sort((a, b) => {
+            const dateDiff = new Date(b.date) - new Date(a.date);
+            if (dateDiff !== 0) return dateDiff;
+            return (b.id || '').localeCompare(a.id || '');
+        });
 
         // Pagination
         const totalPages = Math.ceil(sales.length / this.pageSize);
@@ -244,7 +248,7 @@ const app = {
             const productName = productMap.get(item.product_id) || '未知產品';
             return `
                 <tr>
-                    <td>${item.id || ''}</td>
+                    <td>${(item.id || '').split('-')[0]}</td>
                     <td>${item.date || ''}</td>
                     <td>${item.customer_id || ''}</td>
                     <td>${customerName}</td>
@@ -724,6 +728,15 @@ const app = {
         const mBody = document.getElementById('modal-body');
         const mSave = document.getElementById('modal-save-btn');
 
+        const modalEl = overlay.querySelector('.modal');
+        if (modalEl) {
+            if (type === 'purchase-modal' || type === 'sale-modal') {
+                modalEl.classList.add('modal-lg');
+            } else {
+                modalEl.classList.remove('modal-lg');
+            }
+        }
+
         overlay.style.display = 'flex';
 
         let html = '';
@@ -762,7 +775,6 @@ const app = {
             const products = await DB.getAll('products');
 
             const sOptions = suppliers.map(s => `<option value="${s.id}">${s.name} (${s.id})</option>`).join('');
-            const pOptions = products.map(p => `<option value="${p.id}">${p.name} (${p.id})</option>`).join('');
 
             html = `
                 <div class="form-group"><label>進貨單號</label><input type="text" id="m-id" class="form-control" value="${tid}" readonly></div>
@@ -774,46 +786,104 @@ const app = {
                         ${sOptions}
                     </select>
                 </div>
-                <div class="form-group">
-                    <label>產品</label>
-                    <select id="m-pid" class="form-control">
-                        <option value="">請選擇產品...</option>
-                        ${pOptions}
-                    </select>
+                <div style="margin-top: 20px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center;">
+                    <h4 style="margin: 0; font-size: 0.95rem; color: var(--primary-color);">採購明細</h4>
+                    <button type="button" class="btn btn-sm btn-outline" id="m-add-item-btn">
+                        <i class="ph ph-plus"></i> 新增品項
+                    </button>
                 </div>
-                <div class="form-group"><label>數量</label><input type="number" id="m-qty" class="form-control" value="1"></div>
-                <div class="form-group"><label>單位成本</label><input type="number" id="m-cost" class="form-control"></div>
+                <div id="m-items-container" style="border-top: 1px solid rgba(0,0,0,0.08); padding-top: 15px; max-height: 250px; overflow-y: auto;">
+                    <!-- 動態品項行會插入到這裡 -->
+                </div>
             `;
             
             postRender = () => {
-                document.getElementById('m-pid').onchange = (e) => {
-                    const prod = products.find(p => p.id === e.target.value);
-                    if (prod) document.getElementById('m-cost').value = prod.cost || 0;
+                const container = document.getElementById('m-items-container');
+                const addBtn = document.getElementById('m-add-item-btn');
+                const pOptions = products.map(p => `<option value="${p.id}">${p.name} (${p.id})</option>`).join('');
+
+                const addItemRow = () => {
+                    const rowId = 'row-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+                    const itemHtml = `
+                        <div class="purchase-item-row" id="${rowId}" style="display: flex; gap: 8px; align-items: flex-end; margin-bottom: 12px; border-bottom: 1px dashed rgba(0,0,0,0.05); padding-bottom: 10px;">
+                            <div class="form-group" style="flex: 2; margin-bottom: 0; min-width: 0;">
+                                <label style="font-size: 0.75rem; margin-bottom: 4px;">產品</label>
+                                <select class="form-control item-pid" required style="width: 100%;">
+                                    <option value="">請選擇...</option>
+                                    ${pOptions}
+                                </select>
+                            </div>
+                            <div class="form-group" style="flex: 1; margin-bottom: 0; min-width: 0;">
+                                <label style="font-size: 0.75rem; margin-bottom: 4px;">數量</label>
+                                <input type="number" class="form-control item-qty" value="1" min="1" required style="width: 100%;">
+                            </div>
+                            <div class="form-group" style="flex: 1; margin-bottom: 0; min-width: 0;">
+                                <label style="font-size: 0.75rem; margin-bottom: 4px;">單位成本</label>
+                                <input type="number" class="form-control item-cost" required style="width: 100%;">
+                            </div>
+                            <button type="button" class="btn btn-outline" onclick="document.getElementById('${rowId}').remove()" style="margin-bottom: 0; padding: 8px; color: var(--danger); border-color: rgba(220,38,38,0.2); background: transparent; height: 38px;">
+                                <i class="ph ph-trash"></i>
+                            </button>
+                        </div>
+                    `;
+                    container.insertAdjacentHTML('beforeend', itemHtml);
+
+                    const newRow = document.getElementById(rowId);
+                    const pidSel = newRow.querySelector('.item-pid');
+                    const costInp = newRow.querySelector('.item-cost');
+                    pidSel.onchange = (e) => {
+                        const prod = products.find(p => p.id === e.target.value);
+                        if (prod) {
+                            costInp.value = prod.cost || 0;
+                        }
+                    };
                 };
+
+                addBtn.onclick = () => addItemRow();
+                addItemRow(); // 預設加一筆
             };
 
             saveHandler = async () => {
-                const qty = Number(document.getElementById('m-qty').value);
-                const cost = Number(document.getElementById('m-cost').value);
-                const pid = document.getElementById('m-pid').value;
                 const sid = document.getElementById('m-sid').value;
+                const date = document.getElementById('m-date').value;
+                const id = document.getElementById('m-id').value;
                 
-                if (!pid || !sid) { this.alert('請填寫完整資料'); return false; }
-
-                await DB.save('purchases', {
-                    id: document.getElementById('m-id').value,
-                    date: document.getElementById('m-date').value,
-                    product_id: pid,
-                    supplier_id: sid,
-                    qty: qty,
-                    cost: cost,
-                    total: qty * cost
-                });
-
-                const prod = await db.products.get(pid);
-                if (prod) {
-                    prod.stock = Number(prod.stock || 0) + qty;
-                    await DB.save('products', prod);
+                if (!sid) { await this.alert('請選擇廠商'); return false; }
+                
+                const rows = document.querySelectorAll('.purchase-item-row');
+                if (!rows.length) { await this.alert('請至少新增一個品項'); return false; }
+                
+                const items = [];
+                for (const row of rows) {
+                    const pid = row.querySelector('.item-pid').value;
+                    const qty = Number(row.querySelector('.item-qty').value);
+                    const cost = Number(row.querySelector('.item-cost').value);
+                    
+                    if (!pid) { await this.alert('請選擇所有品項的產品'); return false; }
+                    if (qty <= 0) { await this.alert('數量必須大於 0'); return false; }
+                    if (cost < 0) { await this.alert('單位成本不能小於 0'); return false; }
+                    
+                    items.push({ pid, qty, cost });
+                }
+                
+                for (let i = 0; i < items.length; i++) {
+                    const item = items[i];
+                    const subId = `${id}-${i+1}`;
+                    await DB.save('purchases', {
+                        id: subId,
+                        date: date,
+                        product_id: item.pid,
+                        supplier_id: sid,
+                        qty: item.qty,
+                        cost: item.cost,
+                        total: item.qty * item.cost
+                    });
+                    
+                    const prod = await db.products.get(item.pid);
+                    if (prod) {
+                        prod.stock = Number(prod.stock || 0) + item.qty;
+                        await DB.save('products', prod);
+                    }
                 }
                 return true;
             };
@@ -822,10 +892,8 @@ const app = {
             const tid = this.generateID('S');
             const customers = await DB.getAll('customers');
             const products = await DB.getAll('products');
-            const categories = [...new Set(products.map(p => p.category))].filter(Boolean).sort();
 
             const cOptions = customers.map(c => `<option value="${c.id}">${c.name} (${c.id})</option>`).join('');
-            const catOptions = categories.map(cat => `<option value="${cat}">${cat}</option>`).join('');
 
             html = `
                 <div class="form-group"><label>出貨單號</label><input type="text" id="m-id" class="form-control" value="${tid}" readonly></div>
@@ -837,76 +905,144 @@ const app = {
                         ${cOptions}
                     </select>
                 </div>
-                <div class="form-group">
-                    <label>產品類別</label>
-                    <select id="m-category" class="form-control">
-                        <option value="">請選擇類別...</option>
-                        ${catOptions}
-                    </select>
+                <div style="margin-top: 20px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center;">
+                    <h4 style="margin: 0; font-size: 0.95rem; color: var(--primary-color);">出貨明細</h4>
+                    <button type="button" class="btn btn-sm btn-outline" id="m-add-item-btn">
+                        <i class="ph ph-plus"></i> 新增品項
+                    </button>
                 </div>
-                <div class="form-group">
-                    <label>產品項目</label>
-                    <select id="m-pid" class="form-control">
-                        <option value="">請先選擇類別</option>
-                    </select>
-                    <div id="m-stock-info" style="font-size: 0.8rem; margin-top: 5px; color: var(--primary-color); font-weight: 600;"></div>
+                <div id="m-items-container" style="border-top: 1px solid rgba(0,0,0,0.08); padding-top: 15px; max-height: 280px; overflow-y: auto;">
+                    <!-- 動態品項行會插入到這裡 -->
                 </div>
-                <div class="form-group"><label>數量</label><input type="number" id="m-qty" class="form-control" value="1" min="1"></div>
-                <div class="form-group"><label>售價單價</label><input type="number" id="m-price" class="form-control"></div>
             `;
 
             postRender = () => {
-                const catSel = document.getElementById('m-category');
-                const pidSel = document.getElementById('m-pid');
-                const priceInp = document.getElementById('m-price');
-                const stockInfo = document.getElementById('m-stock-info');
-                const qtyInp = document.getElementById('m-qty');
+                const container = document.getElementById('m-items-container');
+                const addBtn = document.getElementById('m-add-item-btn');
+                const categories = [...new Set(products.map(p => p.category))].filter(Boolean).sort();
+                const catOptions = categories.map(cat => `<option value="${cat}">${cat}</option>`).join('');
 
-                catSel.onchange = () => {
-                    const selectedCat = catSel.value;
-                    const filtered = products.filter(p => p.category === selectedCat);
-                    pidSel.innerHTML = '<option value="">請選擇產品...</option>' + 
-                        filtered.map(p => `<option value="${p.id}" data-price="${p.price}" data-stock="${p.stock}">${p.name} (${p.id})</option>`).join('');
-                    stockInfo.innerText = '';
+                const addItemRow = () => {
+                    const rowId = 'row-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+                    const itemHtml = `
+                        <div class="sale-item-row" id="${rowId}" style="display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; margin-bottom: 12px; border-bottom: 1px dashed rgba(0,0,0,0.05); padding-bottom: 10px;">
+                            <div class="form-group" style="flex: 1.5; margin-bottom: 0; min-width: 120px;">
+                                <label style="font-size: 0.75rem; margin-bottom: 4px;">產品類別</label>
+                                <select class="form-control item-category" style="width: 100%;">
+                                    <option value="">請選擇...</option>
+                                    ${catOptions}
+                                </select>
+                            </div>
+                            <div class="form-group" style="flex: 2; margin-bottom: 0; min-width: 150px;">
+                                <label style="font-size: 0.75rem; margin-bottom: 4px;">產品項目 <span class="item-stock-info" style="color: var(--primary); font-weight: 600; margin-left: 5px;"></span></label>
+                                <select class="form-control item-pid" required style="width: 100%;">
+                                    <option value="">請先選擇類別</option>
+                                </select>
+                            </div>
+                            <div class="form-group" style="flex: 1; margin-bottom: 0; min-width: 70px;">
+                                <label style="font-size: 0.75rem; margin-bottom: 4px;">數量</label>
+                                <input type="number" class="form-control item-qty" value="1" min="1" required style="width: 100%;">
+                            </div>
+                            <div class="form-group" style="flex: 1; margin-bottom: 0; min-width: 80px;">
+                                <label style="font-size: 0.75rem; margin-bottom: 4px;">售價單價</label>
+                                <input type="number" class="form-control item-price" required style="width: 100%;">
+                            </div>
+                            <button type="button" class="btn btn-outline" onclick="document.getElementById('${rowId}').remove()" style="margin-bottom: 0; padding: 8px; color: var(--danger); border-color: rgba(220,38,38,0.2); background: transparent; height: 38px;">
+                                <i class="ph ph-trash"></i>
+                            </button>
+                        </div>
+                    `;
+                    container.insertAdjacentHTML('beforeend', itemHtml);
+
+                    const newRow = document.getElementById(rowId);
+                    const catSel = newRow.querySelector('.item-category');
+                    const pidSel = newRow.querySelector('.item-pid');
+                    const qtyInp = newRow.querySelector('.item-qty');
+                    const priceInp = newRow.querySelector('.item-price');
+                    const stockInfo = newRow.querySelector('.item-stock-info');
+
+                    catSel.onchange = () => {
+                        const selectedCat = catSel.value;
+                        const filtered = products.filter(p => p.category === selectedCat);
+                        pidSel.innerHTML = '<option value="">請選擇產品...</option>' + 
+                            filtered.map(p => `<option value="${p.id}" data-price="${p.price}" data-stock="${p.stock}">${p.name} (${p.id})</option>`).join('');
+                        stockInfo.innerText = '';
+                    };
+
+                    pidSel.onchange = () => {
+                        const opt = pidSel.options[pidSel.selectedIndex];
+                        if (opt && opt.value) {
+                            const stock = Number(opt.getAttribute('data-stock') || 0);
+                            priceInp.value = opt.getAttribute('data-price') || 0;
+                            stockInfo.innerText = `(庫存: ${stock})`;
+                            qtyInp.max = stock;
+                            if (Number(qtyInp.value) > stock) qtyInp.value = stock;
+                        } else {
+                            stockInfo.innerText = '';
+                        }
+                    };
                 };
 
-                pidSel.onchange = () => {
-                    const opt = pidSel.options[pidSel.selectedIndex];
-                    const stock = Number(opt.getAttribute('data-stock') || 0);
-                    priceInp.value = opt.getAttribute('data-price') || 0;
-                    stockInfo.innerText = `目前庫存量: ${stock}`;
-                    qtyInp.max = stock;
-                    if (Number(qtyInp.value) > stock) qtyInp.value = stock;
-                };
+                addBtn.onclick = () => addItemRow();
+                addItemRow(); // 預設加一筆
             };
 
             saveHandler = async () => {
-                const qty = Number(document.getElementById('m-qty').value);
-                const price = Number(document.getElementById('m-price').value);
-                const pid = document.getElementById('m-pid').value;
                 const cid = document.getElementById('m-cid').value;
-
-                if (!pid || !cid) { this.alert('請填寫完整資料'); return false; }
-
-                // Double check stock
-                const prod = await db.products.get(pid);
-                if (!prod || prod.stock < qty) {
-                    await this.alert(`庫存不足！目前庫存僅剩 ${prod ? prod.stock : 0}`);
-                    return false;
+                const date = document.getElementById('m-date').value;
+                const id = document.getElementById('m-id').value;
+                
+                if (!cid) { await this.alert('請選擇客戶'); return false; }
+                
+                const rows = document.querySelectorAll('.sale-item-row');
+                if (!rows.length) { await this.alert('請至少新增一個品項'); return false; }
+                
+                const items = [];
+                const productQtySummary = {};
+                
+                for (const row of rows) {
+                    const pid = row.querySelector('.item-pid').value;
+                    const qty = Number(row.querySelector('.item-qty').value);
+                    const price = Number(row.querySelector('.item-price').value);
+                    
+                    if (!pid) { await this.alert('請選擇所有品項的產品'); return false; }
+                    if (qty <= 0) { await this.alert('數量必須大於 0'); return false; }
+                    if (price < 0) { await this.alert('售價單價不能小於 0'); return false; }
+                    
+                    items.push({ pid, qty, price });
+                    productQtySummary[pid] = (productQtySummary[pid] || 0) + qty;
                 }
-
-                await DB.save('sales', {
-                    id: document.getElementById('m-id').value,
-                    date: document.getElementById('m-date').value,
-                    customer_id: cid,
-                    product_id: pid,
-                    qty: qty,
-                    price: price,
-                    total: qty * price
-                });
-
-                prod.stock = Number(prod.stock || 0) - qty;
-                await DB.save('products', prod);
+                
+                // 檢查庫存量 (合併加總後)
+                for (const pid in productQtySummary) {
+                    const prod = await db.products.get(pid);
+                    const totalQty = productQtySummary[pid];
+                    if (!prod || prod.stock < totalQty) {
+                        await this.alert(`庫存不足！商品「${prod ? prod.name : pid}」的目前庫存僅剩 ${prod ? prod.stock : 0}，但您的出貨總量為 ${totalQty}`);
+                        return false;
+                    }
+                }
+                
+                // 儲存與更新庫存
+                for (let i = 0; i < items.length; i++) {
+                    const item = items[i];
+                    const subId = `${id}-${i+1}`;
+                    await DB.save('sales', {
+                        id: subId,
+                        date: date,
+                        customer_id: cid,
+                        product_id: item.pid,
+                        qty: item.qty,
+                        price: item.price,
+                        total: item.qty * item.price
+                    });
+                    
+                    const prod = await db.products.get(item.pid);
+                    if (prod) {
+                        prod.stock = Number(prod.stock || 0) - item.qty;
+                        await DB.save('products', prod);
+                    }
+                }
                 return true;
             };
         }
