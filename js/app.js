@@ -212,36 +212,50 @@ const app = {
     },
 
     async renderSales() {
-        let data = await DB.getAll('sales');
+        const [sales, customers, products] = await Promise.all([
+            DB.getAll('sales'),
+            DB.getAll('customers'),
+            DB.getAll('products')
+        ]);
+
+        const customerMap = new Map(customers.map(c => [c.id, c.name]));
+        const productMap = new Map(products.map(p => [p.id, p.name]));
+
         const tbody = document.getElementById('sales-tbody');
         const paginationDiv = document.getElementById('sales-pagination');
 
-        if (!data.length) {
-            tbody.innerHTML = '<tr><td colspan="7" class="text-center">尚無出貨資料。</td></tr>';
+        if (!sales.length) {
+            tbody.innerHTML = '<tr><td colspan="9" class="text-center">尚無出貨資料。</td></tr>';
             if (paginationDiv) paginationDiv.innerHTML = '';
             return;
         }
 
         // Sort by Date DESC
-        data.sort((a, b) => new Date(b.date) - new Date(a.date));
+        sales.sort((a, b) => new Date(b.date) - new Date(a.date));
 
         // Pagination
-        const totalPages = Math.ceil(data.length / this.pageSize);
+        const totalPages = Math.ceil(sales.length / this.pageSize);
         const currentPage = this.pages.sales || 1;
         const startIndex = (currentPage - 1) * this.pageSize;
-        const pageData = data.slice(startIndex, startIndex + this.pageSize);
+        const pageData = sales.slice(startIndex, startIndex + this.pageSize);
 
-        tbody.innerHTML = pageData.map(item => `
-            <tr>
-                <td>${item.id || ''}</td>
-                <td>${item.date || ''}</td>
-                <td>${item.customer_id || ''}</td>
-                <td>${item.product_id || ''}</td>
-                <td>$${Number(item.price || 0).toLocaleString()}</td>
-                <td>${item.qty || 0}</td>
-                <td><strong>$${Number(item.total || 0).toLocaleString()}</strong></td>
-            </tr>
-        `).join('');
+        tbody.innerHTML = pageData.map(item => {
+            const customerName = customerMap.get(item.customer_id) || '未知客戶';
+            const productName = productMap.get(item.product_id) || '未知產品';
+            return `
+                <tr>
+                    <td>${item.id || ''}</td>
+                    <td>${item.date || ''}</td>
+                    <td>${item.customer_id || ''}</td>
+                    <td>${customerName}</td>
+                    <td>${item.product_id || ''}</td>
+                    <td>${productName}</td>
+                    <td>$${Number(item.price || 0).toLocaleString()}</td>
+                    <td>${item.qty || 0}</td>
+                    <td><strong>$${Number(item.total || 0).toLocaleString()}</strong></td>
+                </tr>
+            `;
+        }).join('');
 
         this.renderPaginationControls('sales', totalPages, paginationDiv);
     },
