@@ -133,7 +133,10 @@
         <div class="glass-panel table-panel">
             <div class="panel-header">
                 <h3>商品庫存清單</h3>
-                <div class="panel-actions">
+                <div class="panel-actions" style="display: flex; gap: 10px; align-items: center;">
+                    <select id="product-category-filter" class="form-control" style="width: auto; padding: 4px 8px; font-size: 0.85rem; height: 32px;" onchange="app.filterProducts()">
+                        <option value="">全部類別</option>
+                    </select>
                     <button class="btn btn-sm btn-primary" onclick="app.showModal('product-modal')">新增商品</button>
                 </div>
             </div>
@@ -142,8 +145,8 @@
                     <thead>
                         <tr>
                             <th>產品代碼</th>
-                            <th>產品名稱</th>
                             <th>產品類別</th>
+                            <th>產品名稱</th>
                             <th>進貨成本</th>
                             <th>預計售價</th>
                             <th>庫存量</th>

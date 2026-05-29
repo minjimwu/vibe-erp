@@ -156,16 +156,33 @@ const app = {
     async renderProducts() {
         const data = await DB.getAll('products');
         const tbody = document.getElementById('products-tbody');
-        if (!data.length) {
-            tbody.innerHTML = '<tr><td colspan="9" class="text-center">尚無資料，請先新增或匯入 Excel 檔案。</td></tr>';
+        const filterSel = document.getElementById('product-category-filter');
+
+        // Populate category filter options dynamically
+        if (filterSel) {
+            const currentFilter = filterSel.value;
+            const categories = [...new Set(data.map(p => p.category))].filter(Boolean).sort();
+            filterSel.innerHTML = '<option value="">全部類別</option>' +
+                categories.map(cat => `<option value="${cat}">${cat}</option>`).join('');
+            filterSel.value = currentFilter;
+        }
+
+        // Apply category filter
+        const filterVal = filterSel ? filterSel.value : '';
+        const filteredData = filterVal ? data.filter(p => p.category === filterVal) : data;
+
+        if (!filteredData.length) {
+            tbody.innerHTML = filterVal 
+                ? `<tr><td colspan="9" class="text-center">尚無符合類別「${filterVal}」的商品。</td></tr>`
+                : '<tr><td colspan="9" class="text-center">尚無資料，請先新增或匯入 Excel 檔案。</td></tr>';
             return;
         }
 
-        tbody.innerHTML = data.map(item => `
+        tbody.innerHTML = filteredData.map(item => `
             <tr>
                 <td>${item.id || ''}</td>
-                <td><strong>${item.name || ''}</strong></td>
                 <td><span class="category-badge">${item.category || ''}</span></td>
+                <td><strong>${item.name || ''}</strong></td>
                 <td>$${Number(item.cost || 0).toLocaleString()}</td>
                 <td>$${Number(item.price || 0).toLocaleString()}</td>
                 <td><span style="color: ${Number(item.stock) < 10 ? 'var(--danger)' : 'inherit'}">${item.stock || 0}</span></td>
@@ -174,6 +191,10 @@ const app = {
                 <td><button class="btn btn-sm btn-outline" onclick="app.deleteRecord('products', '${item.id}')">刪除</button></td>
             </tr>
         `).join('');
+    },
+
+    filterProducts() {
+        this.renderProducts();
     },
 
     async renderPurchases() {
