@@ -177,36 +177,110 @@ const app = {
     },
 
     async renderPurchases() {
-        let data = await DB.getAll('purchases');
+        const [purchases, suppliers, products] = await Promise.all([
+            DB.getAll('purchases'),
+            DB.getAll('suppliers'),
+            DB.getAll('products')
+        ]);
+
+        const supplierMap = new Map(suppliers.map(s => [s.id, s.name]));
+        const productMap = new Map(products.map(p => [p.id, p.name]));
+
         const tbody = document.getElementById('purchases-tbody');
         const paginationDiv = document.getElementById('purchases-pagination');
 
-        if (!data.length) {
+        if (!purchases.length) {
             tbody.innerHTML = '<tr><td colspan="7" class="text-center">尚無進貨資料。</td></tr>';
             if (paginationDiv) paginationDiv.innerHTML = '';
             return;
         }
 
-        // Sort by Date DESC
-        data.sort((a, b) => new Date(b.date) - new Date(a.date));
+        // Group purchases by Purchase ID (remove -suffix)
+        const orderGroups = {};
+        purchases.forEach(item => {
+            const orderId = (item.id || '').split('-')[0];
+            if (!orderGroups[orderId]) {
+                orderGroups[orderId] = {
+                    id: orderId,
+                    date: item.date,
+                    supplier_id: item.supplier_id,
+                    total: 0,
+                    items: []
+                };
+            }
+            orderGroups[orderId].total += Number(item.total || 0);
+            orderGroups[orderId].items.push(item);
+        });
+
+        const groupedPurchases = Object.values(orderGroups);
+
+        // Sort by Date DESC, then by ID DESC if dates are equal
+        groupedPurchases.sort((a, b) => {
+            const dateDiff = new Date(b.date) - new Date(a.date);
+            if (dateDiff !== 0) return dateDiff;
+            return (b.id || '').localeCompare(a.id || '');
+        });
 
         // Pagination
-        const totalPages = Math.ceil(data.length / this.pageSize);
+        const totalPages = Math.ceil(groupedPurchases.length / this.pageSize);
         const currentPage = this.pages.purchases || 1;
         const startIndex = (currentPage - 1) * this.pageSize;
-        const pageData = data.slice(startIndex, startIndex + this.pageSize);
+        const pageData = groupedPurchases.slice(startIndex, startIndex + this.pageSize);
 
-        tbody.innerHTML = pageData.map(item => `
-            <tr>
-                <td>${(item.id || '').split('-')[0]}</td>
-                <td>${item.date || ''}</td>
-                <td>${item.supplier_id || ''}</td>
-                <td>${item.product_id || ''}</td>
-                <td>$${Number(item.cost || 0).toLocaleString()}</td>
-                <td>${item.qty || 0}</td>
-                <td><strong>$${Number(item.total || 0).toLocaleString()}</strong></td>
-            </tr>
-        `).join('');
+        tbody.innerHTML = pageData.map(order => {
+            const supplierName = supplierMap.get(order.supplier_id) || '未知廠商';
+            
+            const detailRowsHtml = order.items.map(item => {
+                const productName = productMap.get(item.product_id) || '未知產品';
+                return `
+                    <tr>
+                        <td>${item.product_id || ''}</td>
+                        <td>${productName}</td>
+                        <td>$${Number(item.cost || 0).toLocaleString()}</td>
+                        <td>${item.qty || 0}</td>
+                        <td><strong>$${Number(item.total || 0).toLocaleString()}</strong></td>
+                    </tr>
+                `;
+            }).join('');
+
+            return `
+                <tr class="main-order-row" style="cursor: pointer;" onclick="app.toggleOrderDetail('${order.id}')">
+                    <td class="text-center" id="arrow-${order.id}">
+                        <i class="ph ph-caret-right" style="transition: transform 0.2s; font-size: 1.1rem; color: var(--primary);"></i>
+                    </td>
+                    <td><strong>${order.id}</strong></td>
+                    <td>${order.date || ''}</td>
+                    <td>${order.supplier_id || ''}</td>
+                    <td>${supplierName}</td>
+                    <td>${order.items.length}</td>
+                    <td><span style="color: var(--primary); font-weight: 600;">$${Number(order.total || 0).toLocaleString()}</span></td>
+                </tr>
+                <tr class="detail-row" id="detail-row-${order.id}" style="display: none; background: rgba(0,0,0,0.01);">
+                    <td></td>
+                    <td colspan="6">
+                        <div style="padding: 12px 18px; border-left: 3px solid var(--primary); background: rgba(0,0,0,0.005); border-radius: 0 8px 8px 0; margin: 4px 0 10px 0;">
+                            <h5 style="margin: 0 0 10px 0; font-size: 0.85rem; color: var(--text-muted);">
+                                <i class="ph ph-list-bullets"></i> 進貨品項明細
+                            </h5>
+                            <table class="data-table" style="margin: 0; width: 100%; box-shadow: none; font-size: 0.85rem;">
+                                <thead>
+                                    <tr>
+                                        <th>產品代碼</th>
+                                        <th>品項名稱</th>
+                                        <th>單位成本</th>
+                                        <th>數量</th>
+                                        <th>小計</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${detailRowsHtml}
+                                </tbody>
+                            </table>
+                        </div>
+                    </td>
+                </tr>
+            `;
+        }).join('');
 
         this.renderPaginationControls('purchases', totalPages, paginationDiv);
     },
@@ -225,43 +299,113 @@ const app = {
         const paginationDiv = document.getElementById('sales-pagination');
 
         if (!sales.length) {
-            tbody.innerHTML = '<tr><td colspan="9" class="text-center">尚無出貨資料。</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="6" class="text-center">尚無出貨資料。</td></tr>';
             if (paginationDiv) paginationDiv.innerHTML = '';
             return;
         }
 
+        // Group sales by Order ID (remove -suffix)
+        const orderGroups = {};
+        sales.forEach(item => {
+            const orderId = (item.id || '').split('-')[0];
+            if (!orderGroups[orderId]) {
+                orderGroups[orderId] = {
+                    id: orderId,
+                    date: item.date,
+                    customer_id: item.customer_id,
+                    total: 0,
+                    items: []
+                };
+            }
+            orderGroups[orderId].total += Number(item.total || 0);
+            orderGroups[orderId].items.push(item);
+        });
+
+        const groupedSales = Object.values(orderGroups);
+
         // Sort by Date DESC, then by ID DESC if dates are equal
-        sales.sort((a, b) => {
+        groupedSales.sort((a, b) => {
             const dateDiff = new Date(b.date) - new Date(a.date);
             if (dateDiff !== 0) return dateDiff;
             return (b.id || '').localeCompare(a.id || '');
         });
 
         // Pagination
-        const totalPages = Math.ceil(sales.length / this.pageSize);
+        const totalPages = Math.ceil(groupedSales.length / this.pageSize);
         const currentPage = this.pages.sales || 1;
         const startIndex = (currentPage - 1) * this.pageSize;
-        const pageData = sales.slice(startIndex, startIndex + this.pageSize);
+        const pageData = groupedSales.slice(startIndex, startIndex + this.pageSize);
 
-        tbody.innerHTML = pageData.map(item => {
-            const customerName = customerMap.get(item.customer_id) || '未知客戶';
-            const productName = productMap.get(item.product_id) || '未知產品';
+        tbody.innerHTML = pageData.map(order => {
+            const customerName = customerMap.get(order.customer_id) || '未知客戶';
+            
+            const detailRowsHtml = order.items.map(item => {
+                const productName = productMap.get(item.product_id) || '未知產品';
+                return `
+                    <tr>
+                        <td>${item.product_id || ''}</td>
+                        <td>${productName}</td>
+                        <td>$${Number(item.price || 0).toLocaleString()}</td>
+                        <td>${item.qty || 0}</td>
+                        <td><strong>$${Number(item.total || 0).toLocaleString()}</strong></td>
+                    </tr>
+                `;
+            }).join('');
+
             return `
-                <tr>
-                    <td>${(item.id || '').split('-')[0]}</td>
-                    <td>${item.date || ''}</td>
-                    <td>${item.customer_id || ''}</td>
+                <tr class="main-order-row" style="cursor: pointer;" onclick="app.toggleOrderDetail('${order.id}')">
+                    <td class="text-center" id="arrow-${order.id}">
+                        <i class="ph ph-caret-right" style="transition: transform 0.2s; font-size: 1.1rem; color: var(--primary);"></i>
+                    </td>
+                    <td><strong>${order.id}</strong></td>
+                    <td>${order.date || ''}</td>
+                    <td>${order.customer_id || ''}</td>
                     <td>${customerName}</td>
-                    <td>${item.product_id || ''}</td>
-                    <td>${productName}</td>
-                    <td>$${Number(item.price || 0).toLocaleString()}</td>
-                    <td>${item.qty || 0}</td>
-                    <td><strong>$${Number(item.total || 0).toLocaleString()}</strong></td>
+                    <td>${order.items.length}</td>
+                    <td><span style="color: var(--primary); font-weight: 600;">$${Number(order.total || 0).toLocaleString()}</span></td>
+                </tr>
+                <tr class="detail-row" id="detail-row-${order.id}" style="display: none; background: rgba(0,0,0,0.01);">
+                    <td></td>
+                    <td colspan="6">
+                        <div style="padding: 12px 18px; border-left: 3px solid var(--primary); background: rgba(0,0,0,0.005); border-radius: 0 8px 8px 0; margin: 4px 0 10px 0;">
+                            <h5 style="margin: 0 0 10px 0; font-size: 0.85rem; color: var(--text-muted);">
+                                <i class="ph ph-list-bullets"></i> 出貨品項明細
+                            </h5>
+                            <table class="data-table" style="margin: 0; width: 100%; box-shadow: none; font-size: 0.85rem;">
+                                <thead>
+                                    <tr>
+                                        <th>產品代碼</th>
+                                        <th>品項名稱</th>
+                                        <th>售價單價</th>
+                                        <th>數量</th>
+                                        <th>小計</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${detailRowsHtml}
+                                </tbody>
+                            </table>
+                        </div>
+                    </td>
                 </tr>
             `;
         }).join('');
 
         this.renderPaginationControls('sales', totalPages, paginationDiv);
+    },
+
+    toggleOrderDetail(orderId) {
+        const detailRow = document.getElementById(`detail-row-${orderId}`);
+        const arrowTd = document.getElementById(`arrow-${orderId}`);
+        if (detailRow && arrowTd) {
+            const isHidden = detailRow.style.display === 'none';
+            detailRow.style.display = isHidden ? 'table-row' : 'none';
+            
+            const icon = arrowTd.querySelector('i');
+            if (icon) {
+                icon.style.transform = isHidden ? 'rotate(90deg)' : 'rotate(0deg)';
+            }
+        }
     },
 
     renderPaginationControls(type, totalPages, container) {
@@ -800,24 +944,31 @@ const app = {
             postRender = () => {
                 const container = document.getElementById('m-items-container');
                 const addBtn = document.getElementById('m-add-item-btn');
-                const pOptions = products.map(p => `<option value="${p.id}">${p.name} (${p.id})</option>`).join('');
+                const categories = [...new Set(products.map(p => p.category))].filter(Boolean).sort();
+                const catOptions = categories.map(cat => `<option value="${cat}">${cat}</option>`).join('');
 
                 const addItemRow = () => {
                     const rowId = 'row-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
                     const itemHtml = `
-                        <div class="purchase-item-row" id="${rowId}" style="display: flex; gap: 8px; align-items: flex-end; margin-bottom: 12px; border-bottom: 1px dashed rgba(0,0,0,0.05); padding-bottom: 10px;">
-                            <div class="form-group" style="flex: 2; margin-bottom: 0; min-width: 0;">
-                                <label style="font-size: 0.75rem; margin-bottom: 4px;">產品</label>
-                                <select class="form-control item-pid" required style="width: 100%;">
+                        <div class="purchase-item-row" id="${rowId}" style="display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; margin-bottom: 12px; border-bottom: 1px dashed rgba(0,0,0,0.05); padding-bottom: 10px;">
+                            <div class="form-group" style="flex: 1.5; margin-bottom: 0; min-width: 120px;">
+                                <label style="font-size: 0.75rem; margin-bottom: 4px;">產品類別</label>
+                                <select class="form-control item-category" style="width: 100%;">
                                     <option value="">請選擇...</option>
-                                    ${pOptions}
+                                    ${catOptions}
                                 </select>
                             </div>
-                            <div class="form-group" style="flex: 1; margin-bottom: 0; min-width: 0;">
+                            <div class="form-group" style="flex: 2; margin-bottom: 0; min-width: 150px;">
+                                <label style="font-size: 0.75rem; margin-bottom: 4px;">產品項目</label>
+                                <select class="form-control item-pid" required style="width: 100%;">
+                                    <option value="">請先選擇類別</option>
+                                </select>
+                            </div>
+                            <div class="form-group" style="flex: 1; margin-bottom: 0; min-width: 70px;">
                                 <label style="font-size: 0.75rem; margin-bottom: 4px;">數量</label>
                                 <input type="number" class="form-control item-qty" value="1" min="1" required style="width: 100%;">
                             </div>
-                            <div class="form-group" style="flex: 1; margin-bottom: 0; min-width: 0;">
+                            <div class="form-group" style="flex: 1; margin-bottom: 0; min-width: 80px;">
                                 <label style="font-size: 0.75rem; margin-bottom: 4px;">單位成本</label>
                                 <input type="number" class="form-control item-cost" required style="width: 100%;">
                             </div>
@@ -829,12 +980,21 @@ const app = {
                     container.insertAdjacentHTML('beforeend', itemHtml);
 
                     const newRow = document.getElementById(rowId);
+                    const catSel = newRow.querySelector('.item-category');
                     const pidSel = newRow.querySelector('.item-pid');
                     const costInp = newRow.querySelector('.item-cost');
-                    pidSel.onchange = (e) => {
-                        const prod = products.find(p => p.id === e.target.value);
-                        if (prod) {
-                            costInp.value = prod.cost || 0;
+
+                    catSel.onchange = () => {
+                        const selectedCat = catSel.value;
+                        const filtered = products.filter(p => p.category === selectedCat);
+                        pidSel.innerHTML = '<option value="">請選擇產品...</option>' + 
+                            filtered.map(p => `<option value="${p.id}" data-cost="${p.cost}">${p.name} (${p.id})</option>`).join('');
+                    };
+
+                    pidSel.onchange = () => {
+                        const opt = pidSel.options[pidSel.selectedIndex];
+                        if (opt && opt.value) {
+                            costInp.value = opt.getAttribute('data-cost') || 0;
                         }
                     };
                 };
