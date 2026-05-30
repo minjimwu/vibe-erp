@@ -15,10 +15,7 @@ const path = require('path');
         await page.goto(testHtmlPath);
         
         // 等待測試結果 DOM 載入與測試執行完畢
-        await page.waitForFunction(() => {
-            const el = document.getElementById('test-results');
-            return el && el.innerHTML !== '' && !el.innerText.includes('載入中');
-        }, { timeout: 15000 });
+        await page.waitForSelector('#tests-complete', { timeout: 15000 });
         
         // 提取頁面渲染出來的測試案例結果與日誌
         const testResults = await page.evaluate(() => {
