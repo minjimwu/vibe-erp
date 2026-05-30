@@ -60,6 +60,9 @@
                 <a href="#spreadsheet" class="nav-item" data-view="spreadsheet">
                     <i class="ph ph-table"></i> 批次編輯 (Spreadsheet)
                 </a>
+                <a href="#logs" class="nav-item" data-view="logs">
+                    <i class="ph ph-article"></i> 系統日誌
+                </a>
                 <a href="#settings" class="nav-item" data-view="settings">
                     <i class="ph ph-gear"></i> 系統資料
                 </a>
@@ -351,6 +354,54 @@
                 <p>清除所有本機資料後無法還原。</p>
                 <button class="btn" style="background: #ef4444; color: white;"
                     onclick="app.clearDatabase()">清除所有本機資料</button>
+            </div>
+        </div>
+    </template>
+
+    <!-- Template for System Logs -->
+    <template id="tpl-logs">
+        <div class="card glass-panel" style="padding: 24px;">
+            <div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; margin-bottom: 20px;">
+                <h3 style="margin: 0; font-size: 1.15rem; color: var(--primary-color);">系統變更日誌 (Audit Logs)</h3>
+                <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+                    <input type="text" id="log-search" class="form-control" placeholder="搜尋說明、編號..." style="width: 200px; padding: 6px 12px; font-size: 0.85rem; height: 36px; margin-bottom: 0;">
+                    <select id="log-filter-module" class="form-control" style="width: 140px; padding: 6px 12px; font-size: 0.85rem; height: 36px; margin-bottom: 0;">
+                        <option value="">所有模組</option>
+                        <option value="product">商品庫存</option>
+                        <option value="purchase">進貨管理</option>
+                        <option value="sale">出貨管理</option>
+                        <option value="supplier">進貨廠商</option>
+                        <option value="customer">客戶資料</option>
+                        <option value="database">系統資料庫</option>
+                    </select>
+                    <select id="log-filter-action" class="form-control" style="width: 120px; padding: 6px 12px; font-size: 0.85rem; height: 36px; margin-bottom: 0;">
+                        <option value="">所有動作</option>
+                        <option value="CREATE">新增 (CREATE)</option>
+                        <option value="UPDATE">修改 (UPDATE)</option>
+                        <option value="DELETE">刪除 (DELETE)</option>
+                    </select>
+                </div>
+            </div>
+
+            <div style="overflow-x: auto;">
+                <table class="data-table" style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
+                    <thead>
+                        <tr>
+                            <th style="text-align: left; padding: 10px 12px;">時間</th>
+                            <th style="text-align: left; padding: 10px 12px;">操作人員</th>
+                            <th style="text-align: left; padding: 10px 12px;">動作</th>
+                            <th style="text-align: left; padding: 10px 12px;">目標模組</th>
+                            <th style="text-align: left; padding: 10px 12px;">目標編號</th>
+                            <th style="text-align: left; padding: 10px 12px;">操作說明</th>
+                            <th style="text-align: center; padding: 10px 12px; width: 100px;">詳細資訊</th>
+                        </tr>
+                    </thead>
+                    <tbody id="logs-tbody">
+                        <tr>
+                            <td colspan="7" class="text-center" style="padding: 20px;">載入中...</td>
+                        </tr>
+                    </tbody>
+                </table>
             </div>
         </div>
     </template>

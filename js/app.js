@@ -5,6 +5,40 @@ const app = {
     pages: { purchases: 1, sales: 1 },
     pageSize: 10,
 
+    // --- 核心變更歷程 (Audit Log) 記錄方法 ---
+    async addAuditLog(action, targetType, targetId, description, oldVal = null, newVal = null) {
+        let changedFields = null;
+        if (action === 'UPDATE' && oldVal && newVal) {
+            changedFields = {};
+            const keys = new Set([...Object.keys(oldVal), ...Object.keys(newVal)]);
+            for (const key of keys) {
+                if (key === 'id') continue; // 忽略主鍵
+                const oldStr = JSON.stringify(oldVal[key]);
+                const newStr = JSON.stringify(newVal[key]);
+                if (oldStr !== newStr) {
+                    changedFields[key] = {
+                        old: oldVal[key],
+                        new: newVal[key]
+                    };
+                }
+            }
+            if (Object.keys(changedFields).length === 0) {
+                changedFields = null;
+            }
+        }
+
+        const logEntry = {
+            timestamp: new Date().toISOString(),
+            action: action,
+            target_type: targetType,
+            target_id: targetId,
+            description: description,
+            details: changedFields ? { changed_fields: changedFields } : (oldVal || newVal ? { value: oldVal || newVal } : null),
+            operator: '系統管理員'
+        };
+        await db.audit_logs.put(logEntry);
+    },
+
     // Initialize the app
     async init() {
         this.bindEvents();
@@ -54,6 +88,7 @@ const app = {
             'customers': '客戶資料 Customers',
             'reports': '銷售報表 Reports',
             'spreadsheet': '批次編輯 Spreadsheet',
+            'logs': '系統日誌 Audit Logs',
             'settings': '系統資料 Settings'
         };
         document.getElementById('page-title').innerText = titles[view] || 'Vibe ERP';
@@ -87,6 +122,7 @@ const app = {
                 case 'customers': await this.renderCustomers(); break;
                 case 'reports': await this.renderReports(); break;
                 case 'spreadsheet': await this.renderSpreadsheet(); break;
+                case 'logs': await this.renderLogs(); break;
                 case 'settings': await this.renderSettings(); break;
             }
         } catch (e) {
@@ -507,7 +543,7 @@ const app = {
         if (!confirmed) return;
         
         try {
-            await db.transaction('rw', db.products, db.sales, async () => {
+            await db.transaction('rw', db.products, db.sales, db.audit_logs, async () => {
                 // 刪除出貨紀錄
                 await db.sales.where('id').startsWith(orderId).delete();
                 
@@ -519,6 +555,8 @@ const app = {
                         await db.products.put(prod);
                     }
                 }
+                
+                await this.addAuditLog('DELETE', 'sale', orderId, `刪除出貨單 ${orderId}`, existingItems, null);
             });
             
             this.showToast('刪除成功');
@@ -597,7 +635,7 @@ const app = {
         if (!confirmed) return;
         
         try {
-            await db.transaction('rw', db.products, db.purchases, async () => {
+            await db.transaction('rw', db.products, db.purchases, db.audit_logs, async () => {
                 // 刪除進貨紀錄
                 await db.purchases.where('id').startsWith(orderId).delete();
                 
@@ -609,6 +647,8 @@ const app = {
                         await db.products.put(prod);
                     }
                 }
+                
+                await this.addAuditLog('DELETE', 'purchase', orderId, `刪除進貨單 ${orderId}`, existingItems, null);
             });
             
             this.showToast('刪除成功');
@@ -824,10 +864,71 @@ const app = {
             const tableName = tableSelect.value;
 
             try {
+                // 1. 取得舊資料以進行比對
+                const oldData = await DB.getAll(tableName);
+                const oldMap = {};
+                oldData.forEach(item => { oldMap[item.id] = item; });
+
                 // Filter out empty rows (where ID is missing)
                 const finalData = updatedData.filter(row => row.id && row.id.toString().trim() !== '');
+                const newMap = {};
+                finalData.forEach(item => { newMap[item.id] = item; });
 
+                // 2. 執行 bulkInsert
                 await DB.bulkInsert(tableName, finalData);
+
+                // 3. 計算變更並記錄日誌
+                const targetTypeMap = {
+                    products: 'product',
+                    suppliers: 'supplier',
+                    customers: 'customer'
+                };
+                const targetType = targetTypeMap[tableName] || tableName;
+                
+                const tableNames = {
+                    products: '商品',
+                    suppliers: '廠商',
+                    customers: '客戶'
+                };
+                const typeName = tableNames[tableName] || tableName;
+
+                // A. 找出被刪除的
+                for (const oldId in oldMap) {
+                    if (!newMap[oldId]) {
+                        const oldItem = oldMap[oldId];
+                        const name = oldItem.name || oldId;
+                        await this.addAuditLog('DELETE', targetType, oldId, `批次刪除${typeName}「${name}」 (編號: ${oldId})`, oldItem, null);
+                    }
+                }
+
+                // B. 找出被新增的與被修改的
+                for (const newId in newMap) {
+                    const newItem = newMap[newId];
+                    const name = newItem.name || newId;
+                    const oldItem = oldMap[newId];
+
+                    if (!oldItem) {
+                        // 新增
+                        await this.addAuditLog('CREATE', targetType, newId, `批次新增${typeName}「${name}」 (編號: ${newId})`, null, newItem);
+                    } else {
+                        // 比對是否有欄位變更
+                        let changed = false;
+                        const keys = new Set([...Object.keys(oldItem), ...Object.keys(newItem)]);
+                        for (const key of keys) {
+                            if (key === 'id') continue;
+                            const oldStr = JSON.stringify(oldItem[key]);
+                            const newStr = JSON.stringify(newItem[key]);
+                            if (oldStr !== newStr) {
+                                changed = true;
+                                break;
+                            }
+                        }
+                        if (changed) {
+                            await this.addAuditLog('UPDATE', targetType, newId, `批次修改${typeName}「${name}」 (編號: ${newId})`, oldItem, newItem);
+                        }
+                    }
+                }
+
                 this.showToast('批次更新成功');
                 await loadGrid();
             } catch (err) {
@@ -867,7 +968,13 @@ const app = {
             const data = await DB.getAll(tableName);
             const aoa = [Object.values(mapping)]; // Headers
             data.forEach(item => {
-                const row = Object.keys(mapping).map(k => item[k] !== undefined ? item[k] : '');
+                const row = Object.keys(mapping).map(k => {
+                    if (item[k] === undefined) return '';
+                    if (typeof item[k] === 'object' && item[k] !== null) {
+                        return JSON.stringify(item[k]);
+                    }
+                    return item[k];
+                });
                 aoa.push(row);
             });
             const ws = XLSX.utils.aoa_to_sheet(aoa);
@@ -903,6 +1010,11 @@ const app = {
             employee: "打單人員", discount: "銷貨折扣", shipping: "運費收入",
             cost: "商品成本", profit: "商品毛利", tax: "稅額", net_total: "商品總額"
         });
+        await mapToSheet('audit_logs', '系統日誌', {
+            id: "日誌編號", timestamp: "時間戳記", action: "操作類型",
+            target_type: "目標模組", target_id: "目標編號", description: "描述",
+            details: "詳細資料(JSON)", operator: "操作人員"
+        });
 
         XLSX.writeFile(wb, `VibeERP_Backup_${new Date().toISOString().slice(0, 10)}.xlsx`);
         this.showToast("資料已匯出");
@@ -925,7 +1037,15 @@ const app = {
                     const formatted = json.map(row => {
                         const obj = {};
                         for (let key in mapping) {
-                            obj[key] = row[mapping[key]];
+                            let val = row[mapping[key]];
+                            if (key === 'details' && typeof val === 'string' && val.trim() !== '') {
+                                try {
+                                    val = JSON.parse(val);
+                                } catch (err) {
+                                    // Keep as string if parsing fails
+                                }
+                            }
+                            obj[key] = val !== undefined ? val : '';
                         }
                         return obj;
                     });
@@ -934,7 +1054,7 @@ const app = {
                     }
                 };
 
-                await db.transaction('rw', db.products, db.suppliers, db.customers, db.purchases, db.sales, async () => {
+                await db.transaction('rw', db.products, db.suppliers, db.customers, db.purchases, db.sales, db.audit_logs, async () => {
                     await processSheet('商品庫存', 'products', {
                         id: "產品代碼", name: "產品名稱", category: "產品類別",
                         cost: "進貨成本", price: "預計售價", stock: "庫存量",
@@ -964,6 +1084,11 @@ const app = {
                         employee: "打單人員", discount: "銷貨折扣", shipping: "運費收入",
                         cost: "商品成本", profit: "商品毛利", tax: "稅額", net_total: "商品總額"
                     });
+                    await processSheet('系統日誌', 'audit_logs', {
+                        id: "日誌編號", timestamp: "時間戳記", action: "操作類型",
+                        target_type: "目標模組", target_id: "目標編號", description: "描述",
+                        details: "詳細資料(JSON)", operator: "操作人員"
+                    });
                 });
 
                 this.showToast("資料匯入成功");
@@ -988,7 +1113,28 @@ const app = {
 
     async deleteRecord(table, id) {
         if (await this.confirm('確定要刪除這筆資料嗎？')) {
+            const oldVal = await db[table].get(id);
             await DB.delete(table, id);
+            
+            // 寫入變更日誌
+            const name = oldVal ? (oldVal.name || id) : id;
+            const tableNames = {
+                products: '商品',
+                suppliers: '廠商',
+                customers: '客戶'
+            };
+            const typeName = tableNames[table] || table;
+            const desc = `刪除${typeName}「${name}」 (編號: ${id})`;
+            
+            const targetTypeMap = {
+                products: 'product',
+                suppliers: 'supplier',
+                customers: 'customer'
+            };
+            const targetType = targetTypeMap[table] || table;
+            
+            await this.addAuditLog('DELETE', targetType, id, desc, oldVal, null);
+            
             this.showToast('刪除成功');
             this.navigate(this.currentView);
         }
@@ -997,9 +1143,156 @@ const app = {
     async clearDatabase() {
         if (await this.confirm('警告：此操作將清除所有系統中的資料且不可還原。您確定嗎？', '危險操作')) {
             await DB.clearAll();
+            await this.addAuditLog('DELETE', 'database', 'all', '清除所有系統資料庫資料', null, null);
             this.showToast('資料已全數清除');
             this.navigate('dashboard');
         }
+    },
+
+    // --- 系統變更日誌 (Audit Logs) 頁面渲染與交互 ---
+    async renderLogs() {
+        const searchInput = document.getElementById('log-search');
+        const filterModule = document.getElementById('log-filter-module');
+        const filterAction = document.getElementById('log-filter-action');
+        const tbody = document.getElementById('logs-tbody');
+
+        if (!tbody) return;
+
+        const allLogs = await db.audit_logs.orderBy('id').reverse().toArray();
+
+        const renderFiltered = () => {
+            const query = (searchInput.value || '').toLowerCase().trim();
+            const mod = filterModule.value;
+            const act = filterAction.value;
+
+            const filtered = allLogs.filter(log => {
+                // 1. 動作篩選
+                if (act && log.action !== act) return false;
+                // 2. 模組篩選
+                if (mod && log.target_type !== mod) return false;
+                // 3. 關鍵字搜尋
+                if (query) {
+                    const matchDesc = (log.description || '').toLowerCase().includes(query);
+                    const matchId = (log.target_id || '').toLowerCase().includes(query);
+                    const matchOperator = (log.operator || '').toLowerCase().includes(query);
+                    if (!matchDesc && !matchId && !matchOperator) return false;
+                }
+                return true;
+            });
+
+            if (!filtered.length) {
+                tbody.innerHTML = '<tr><td colspan="7" class="text-center" style="padding: 20px;">無符合篩選條件的日誌。</td></tr>';
+                return;
+            }
+
+            const targetNames = {
+                product: '商品庫存',
+                purchase: '進貨管理',
+                sale: '出貨管理',
+                supplier: '進貨廠商',
+                customer: '客戶資料',
+                database: '系統資料庫'
+            };
+
+            tbody.innerHTML = filtered.map(log => {
+                const dateStr = new Date(log.timestamp).toLocaleString('zh-TW');
+                const actionBadgeColor = log.action === 'CREATE' ? 'var(--primary)' : (log.action === 'UPDATE' ? '#eab308' : 'var(--danger)');
+                const hasDetails = log.details && (log.details.changed_fields || log.details.value);
+                const detailBtn = hasDetails
+                    ? `<button class="btn btn-sm btn-outline" style="padding: 2px 6px; font-size: 0.8rem; margin: 0 auto; display: block;" onclick="app.showLogDetail(${log.id})">檢視</button>`
+                    : '<span style="color: var(--text-muted); font-size: 0.8rem; display: block; text-align: center;">無</span>';
+
+                return `
+                    <tr>
+                        <td>${dateStr}</td>
+                        <td>${log.operator || '系統管理員'}</td>
+                        <td><span style="color: ${actionBadgeColor}; font-weight: bold;">${log.action}</span></td>
+                        <td>${targetNames[log.target_type] || log.target_type}</td>
+                        <td>${log.target_id || ''}</td>
+                        <td>${log.description || ''}</td>
+                        <td>${detailBtn}</td>
+                    </tr>
+                `;
+            }).join('');
+        };
+
+        searchInput.oninput = renderFiltered;
+        filterModule.onchange = renderFiltered;
+        filterAction.onchange = renderFiltered;
+
+        renderFiltered();
+    },
+
+    async showLogDetail(logId) {
+        const log = await db.audit_logs.get(logId);
+        if (!log || !log.details) {
+            await this.alert('無此日誌的詳細資料');
+            return;
+        }
+
+        let html = '';
+        if (log.action === 'UPDATE' && log.details.changed_fields) {
+            const diff = log.details.changed_fields;
+            let rowsHtml = '';
+            
+            // 欄位名稱翻譯對照
+            const fieldNames = {
+                name: '名稱', category: '類別', cost: '進貨成本/單位成本',
+                price: '售價/預計售價', stock: '庫存量', unit: '單位',
+                supplier_id: '供應商/廠商ID', customer_id: '客戶ID',
+                date: '日期', qty: '數量', total: '總金額',
+                full_name: '廠商全名', contact: '聯絡人', tax_id: '統一編號',
+                phone: '電話', mobile: '手機', fax: '傳真',
+                zip_code: '郵遞區號', address: '地址', remark: '備註',
+                remarks: '備註', email: 'Email', salesperson: '服務員',
+                birthday: '生日', gender: '性別', vip_card: '貴賓卡號',
+                member_card: '會員卡號'
+            };
+
+            for (const field in diff) {
+                const oldVal = diff[field].old === undefined || diff[field].old === null ? '(空)' : diff[field].old;
+                const newVal = diff[field].new === undefined || diff[field].new === null ? '(空)' : diff[field].new;
+                
+                rowsHtml += `
+                    <tr>
+                        <td style="padding: 6px; font-weight: bold;">${fieldNames[field] || field}</td>
+                        <td style="padding: 6px; color: var(--danger); text-decoration: line-through;">${typeof oldVal === 'object' ? JSON.stringify(oldVal) : oldVal}</td>
+                        <td style="padding: 6px; color: var(--primary); font-weight: bold;">➔ ${typeof newVal === 'object' ? JSON.stringify(newVal) : newVal}</td>
+                    </tr>
+                `;
+            }
+
+            html = `
+                <div style="text-align: left;">
+                    <p style="margin-bottom: 8px;"><strong>日誌說明：</strong>${log.description}</p>
+                    <table class="data-table" style="width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-top: 8px;">
+                        <thead>
+                            <tr>
+                                <th style="padding: 6px; text-align: left;">變更欄位</th>
+                                <th style="padding: 6px; text-align: left;">修改前</th>
+                                <th style="padding: 6px; text-align: left;">修改後</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${rowsHtml}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        } else {
+            // 新增 (CREATE) 或 刪除 (DELETE) 的快照物件呈現
+            const val = log.details.value || log.details;
+            const prettyJson = JSON.stringify(val, null, 2);
+            html = `
+                <div style="text-align: left;">
+                    <p style="margin-bottom: 8px;"><strong>日誌說明：</strong>${log.description}</p>
+                    <p style="margin-bottom: 4px;"><strong>資料快照 (Snapshot)：</strong></p>
+                    <pre style="background: rgba(0,0,0,0.03); padding: 12px; border-radius: 6px; max-height: 250px; overflow-y: auto; font-family: monospace; font-size: 0.8rem; margin: 0; white-space: pre-wrap; word-break: break-all;">${prettyJson}</pre>
+                </div>
+            `;
+        }
+
+        await this.alert(html, `${log.action} 詳細資料`);
     },
 
     // --- Settings 頁面渲染（含一鍵匯入舊資料） ---
@@ -1112,16 +1405,27 @@ const app = {
                 <div class="form-group"><label>供應商ID</label><input type="text" id="m-supplier-id" class="form-control"></div>
             `;
             saveHandler = async () => {
-                await DB.save('products', {
-                    id: document.getElementById('m-id').value,
-                    name: document.getElementById('m-name').value,
-                    category: document.getElementById('m-category').value,
-                    cost: document.getElementById('m-cost').value,
-                    price: document.getElementById('m-price').value,
-                    stock: document.getElementById('m-stock').value,
-                    unit: document.getElementById('m-unit').value,
-                    supplier_id: document.getElementById('m-supplier-id').value
-                });
+                const id = document.getElementById('m-id').value;
+                const name = document.getElementById('m-name').value;
+                const category = document.getElementById('m-category').value;
+                const cost = Number(document.getElementById('m-cost').value || 0);
+                const price = Number(document.getElementById('m-price').value || 0);
+                const stock = Number(document.getElementById('m-stock').value || 0);
+                const unit = document.getElementById('m-unit').value;
+                const supplier_id = document.getElementById('m-supplier-id').value;
+
+                if (!id) { await this.alert('請輸入產品代碼'); return false; }
+
+                const oldVal = await db.products.get(id);
+                const isEdit = !!oldVal;
+
+                const productData = { id, name, category, cost, price, stock, unit, supplier_id };
+                await DB.save('products', productData);
+
+                const action = isEdit ? 'UPDATE' : 'CREATE';
+                const desc = isEdit ? `編輯商品「${name}」 (代碼: ${id})` : `新增商品「${name}」 (代碼: ${id})`;
+                await this.addAuditLog(action, 'product', id, desc, oldVal, productData);
+
                 return true;
             };
         } else if (type === 'purchase-modal') {
@@ -1393,7 +1697,7 @@ const app = {
                 
                 // 執行正式儲存與更新庫存
                 try {
-                    await db.transaction('rw', db.products, db.purchases, async () => {
+                    await db.transaction('rw', db.products, db.purchases, db.audit_logs, async () => {
                         // 1. 如果是編輯模式，先刪除該 orderId 對應的所有舊進貨明細
                         if (isEdit) {
                             await db.purchases.where('id').startsWith(tid).delete();
@@ -1423,6 +1727,13 @@ const app = {
                                 await db.products.put(prod);
                             }
                         }
+
+                        // 4. 記錄變更歷程
+                        const supplier = suppliers.find(s => s.id === sid);
+                        const supplierName = supplier ? supplier.name : sid;
+                        const action = isEdit ? 'UPDATE' : 'CREATE';
+                        const desc = isEdit ? `編輯進貨單 ${tid} (廠商: ${supplierName})` : `新增進貨單 ${tid} (廠商: ${supplierName})`;
+                        await this.addAuditLog(action, 'purchase', tid, desc, isEdit ? existingItems : null, newItems);
                     });
                     
                     this._modalSuccessMsg = isEdit ? '編輯成功' : '新增成功';
@@ -1748,7 +2059,7 @@ const app = {
                 
                 // 執行正式儲存與更新庫存
                 try {
-                    await db.transaction('rw', db.products, db.sales, async () => {
+                    await db.transaction('rw', db.products, db.sales, db.audit_logs, async () => {
                         // 1. 如果是編輯模式，先刪除該 orderId 對應的所有舊銷售明細
                         if (isEdit) {
                             await db.sales.where('id').startsWith(tid).delete();
@@ -1778,6 +2089,13 @@ const app = {
                                 await db.products.put(prod);
                             }
                         }
+
+                        // 4. 記錄變更歷程
+                        const customer = customers.find(c => c.id === cid);
+                        const customerName = customer ? customer.name : cid;
+                        const action = isEdit ? 'UPDATE' : 'CREATE';
+                        const desc = isEdit ? `編輯出貨單 ${tid} (客戶: ${customerName})` : `新增出貨單 ${tid} (客戶: ${customerName})`;
+                        await this.addAuditLog(action, 'sale', tid, desc, isEdit ? existingItems : null, newItems);
                     });
                     
                     this._modalSuccessMsg = isEdit ? '編輯成功' : '新增成功';

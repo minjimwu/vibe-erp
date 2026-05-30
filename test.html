@@ -64,12 +64,13 @@
     <script>
         // 1. 初始化測試資料庫 (不污染正式庫，與主資料庫結構一致)
         const db = new Dexie('VibeERP_Test');
-        db.version(3).stores({
+        db.version(4).stores({
             products: 'id, name, category, cost, price, stock, unit, supplier_id',
             suppliers: 'id, name, full_name, contact, phone, mobile, tax_id, email, fax, zip_code, address, remark',
             customers: 'id, name, phone, address, english_name, salesperson, birthday, gender, email, tax_id, invoice_title, vip_card, member_card, store_value_id, customer_type, fax, zip_code, remarks',
             purchases: 'id, date, supplier_id, product_id, cost, qty, total',
-            sales: 'id, date, customer_id, product_id, price, qty, total, employee, discount, shipping, cost, profit, tax, net_total, original_order_id'
+            sales: 'id, date, customer_id, product_id, price, qty, total, employee, discount, shipping, cost, profit, tax, net_total, original_order_id',
+            audit_logs: '++id, timestamp, action, target_type, target_id, operator'
         });
 
         // 模擬的 app helper (抽離儲存與庫存連動邏輯)
@@ -202,7 +203,7 @@
                     productsToUpdate[pid] = { change };
                 }
 
-                await db.transaction('rw', db.products, db.purchases, async () => {
+                await db.transaction('rw', db.products, db.purchases, db.audit_logs, async () => {
                     await db.purchases.where('id').startsWith(orderId).delete();
 
                     for (let i = 0; i < items.length; i++) {
@@ -227,6 +228,10 @@
                             await db.products.put(prod);
                         }
                     }
+
+                    const action = originalItems.length > 0 ? 'UPDATE' : 'CREATE';
+                    const desc = action === 'UPDATE' ? `編輯進貨單 ${orderId}` : `新增進貨單 ${orderId}`;
+                    await this.addAuditLog(action, 'purchase', orderId, desc, originalItems.length > 0 ? originalItems : null, items);
                 });
             },
 
@@ -252,7 +257,7 @@
                     productsToUpdate[item.product_id] = (productsToUpdate[item.product_id] || 0) + item.qty;
                 }
 
-                await db.transaction('rw', db.products, db.purchases, async () => {
+                await db.transaction('rw', db.products, db.purchases, db.audit_logs, async () => {
                     await db.purchases.where('id').startsWith(orderId).delete();
                     for (const pid in productsToUpdate) {
                         const qtyToDeduct = productsToUpdate[pid];
@@ -262,7 +267,62 @@
                             await db.products.put(prod);
                         }
                     }
+                    await this.addAuditLog('DELETE', 'purchase', orderId, `刪除進貨單 ${orderId}`, existingItems, null);
                 });
+            },
+
+            // --- 核心變更歷程 (Audit Log) 模擬與輔助邏輯 ---
+            async addAuditLog(action, targetType, targetId, description, oldVal = null, newVal = null) {
+                let changedFields = null;
+                if (action === 'UPDATE' && oldVal && newVal) {
+                    changedFields = {};
+                    const keys = new Set([...Object.keys(oldVal), ...Object.keys(newVal)]);
+                    for (const key of keys) {
+                        if (key === 'id') continue; // 忽略主鍵
+                        const oldStr = JSON.stringify(oldVal[key]);
+                        const newStr = JSON.stringify(newVal[key]);
+                        if (oldStr !== newStr) {
+                            changedFields[key] = {
+                                old: oldVal[key],
+                                new: newVal[key]
+                            };
+                        }
+                    }
+                    if (Object.keys(changedFields).length === 0) {
+                        changedFields = null;
+                    }
+                }
+
+                const logEntry = {
+                    timestamp: new Date().toISOString(),
+                    action: action,
+                    target_type: targetType,
+                    target_id: targetId,
+                    description: description,
+                    details: changedFields ? { changed_fields: changedFields } : (oldVal || newVal ? { value: oldVal || newVal } : null),
+                    operator: '系統管理員'
+                };
+                await db.audit_logs.put(logEntry);
+            },
+
+            async saveProduct(id, data) {
+                const oldVal = await db.products.get(id);
+                const isEdit = !!oldVal;
+                
+                await db.products.put({ id, ...data });
+                
+                const action = isEdit ? 'UPDATE' : 'CREATE';
+                const desc = isEdit ? `編輯商品「${data.name}」` : `新增商品「${data.name}」`;
+                
+                await this.addAuditLog(action, 'product', id, desc, oldVal, { id, ...data });
+            },
+
+            async deleteProduct(id) {
+                const oldVal = await db.products.get(id);
+                if (oldVal) {
+                    await db.products.delete(id);
+                    await this.addAuditLog('DELETE', 'product', id, `刪除商品「${oldVal.name}」`, oldVal, null);
+                }
             }
         };
 
@@ -293,6 +353,7 @@
                 await db.products.clear();
                 await db.sales.clear();
                 await db.purchases.clear();
+                await db.audit_logs.clear();
                 
                 // 置入預設商品庫存
                 await db.products.bulkAdd([
@@ -555,6 +616,120 @@
                 assert(p5Items.length === 1, '編輯後的進貨明細筆數有誤');
                 log(`商品進貨明細廠商 ID：${p5Items[0].supplier_id} (預期：S002)`);
                 assert(p5Items[0].supplier_id === 'S002', '編輯後，廠商 ID 未成功更新為 S002');
+            });
+
+            await runTestCase('測試案例 10：執行商品新增、修改、刪除時，應正確記錄變更歷程與 Diff 差異', async (log) => {
+                log('1. 新增商品 P003');
+                await testApp.saveProduct('P003', { name: '全新商品', category: '類別1', cost: 120, price: 200, stock: 5, unit: '個' });
+
+                let logs = await db.audit_logs.where('target_id').equals('P003').toArray();
+                assert(logs.length === 1, '商品新增後，未產生變更日誌');
+                assert(logs[0].action === 'CREATE', '商品新增日誌之動作非 CREATE');
+                assert(logs[0].target_type === 'product', '商品新增日誌之目標非 product');
+                log(`商品新增日誌動作：${logs[0].action} (預期：CREATE)`);
+
+                log('2. 編輯商品 P003 (修改價格與庫存)');
+                await testApp.saveProduct('P003', { name: '全新商品', category: '類別1', cost: 120, price: 250, stock: 8, unit: '個' });
+
+                logs = await db.audit_logs.where('target_id').equals('P003').toArray();
+                assert(logs.length === 2, '商品編輯後，未正確追加變更日誌');
+                const updateLog = logs.find(l => l.action === 'UPDATE');
+                assert(!!updateLog, '商品編輯日誌之動作非 UPDATE');
+                log(`商品編輯日誌動作：${updateLog.action} (預期：UPDATE)`);
+
+                assert(!!updateLog.details && !!updateLog.details.changed_fields, '編輯日誌中無 changed_fields');
+                const diff = updateLog.details.changed_fields;
+                log(`商品編輯比對 - 價格(price) 舊值：${diff.price.old} 👉 新值：${diff.price.new}`);
+                log(`商品編輯比對 - 庫存(stock) 舊值：${diff.stock.old} 👉 新值：${diff.stock.new}`);
+
+                assert(diff.price.old === 200 && diff.price.new === 250, '價格 Diff 比對錯誤');
+                assert(diff.stock.old === 5 && diff.stock.new === 8, '庫存 Diff 比對錯誤');
+
+                log('3. 刪除商品 P003');
+                await testApp.deleteProduct('P003');
+
+                logs = await db.audit_logs.where('target_id').equals('P003').toArray();
+                assert(logs.length === 3, '商品刪除後，未正確追加變更日誌');
+                const deleteLog = logs.find(l => l.action === 'DELETE');
+                assert(!!deleteLog, '商品刪除日誌之動作非 DELETE');
+                log(`商品刪除日誌動作：${deleteLog.action} (預期：DELETE)`);
+            });
+
+            await runTestCase('測試案例 11：匯出與匯入後，變更歷程 (Audit Log) 應能正確備份與還原', async (log) => {
+                log('1. 寫入模擬測試日誌');
+                const timeStr = new Date().toISOString();
+                const mockLogs = [
+                    {
+                        id: 101,
+                        timestamp: timeStr,
+                        action: 'CREATE',
+                        target_type: 'product',
+                        target_id: 'P999',
+                        description: '模擬商品建立',
+                        details: { value: { id: 'P999', name: '模擬品', stock: 10 } },
+                        operator: '系統管理員'
+                    },
+                    {
+                        id: 102,
+                        timestamp: timeStr,
+                        action: 'UPDATE',
+                        target_type: 'product',
+                        target_id: 'P999',
+                        description: '模擬商品修改',
+                        details: { changed_fields: { stock: { old: 10, new: 15 } } },
+                        operator: '系統管理員'
+                    }
+                ];
+                await db.audit_logs.bulkAdd(mockLogs);
+
+                log('2. 模擬匯出備份 (序列化 details 欄位為 JSON 字串)');
+                // 模擬 mapToSheet 的處理方式
+                const exportedData = mockLogs.map(item => {
+                    const row = { ...item };
+                    if (row.details && typeof row.details === 'object') {
+                        row.details = JSON.stringify(row.details);
+                    }
+                    return row;
+                });
+
+                log(`備份字串 (details 1)：${exportedData[0].details}`);
+                log(`備份字串 (details 2)：${exportedData[1].details}`);
+                assert(typeof exportedData[0].details === 'string', '備份時 details 欄位未成功轉換為字串');
+
+                log('3. 清空資料庫以模擬還原環境');
+                await db.audit_logs.clear();
+
+                log('4. 模擬匯入還原 (解碼 JSON 字串並以 bulkAdd 寫回)');
+                // 模擬 processSheet 寫回與 JSON 轉碼
+                const importedData = exportedData.map(row => {
+                    const obj = { ...row };
+                    if (obj.details && typeof obj.details === 'string') {
+                        try {
+                            obj.details = JSON.parse(obj.details);
+                        } catch (e) {
+                            // 解析失敗時維持原字串
+                        }
+                    }
+                    return obj;
+                });
+
+                await db.audit_logs.bulkAdd(importedData);
+
+                log('5. 驗證資料是否完整還原，且 details 成功變回物件');
+                const restoredLogs = await db.audit_logs.toArray();
+                assert(restoredLogs.length === 2, '還原後的日誌筆數有誤');
+                
+                const restoreCreate = restoredLogs.find(l => l.action === 'CREATE');
+                const restoreUpdate = restoredLogs.find(l => l.action === 'UPDATE');
+
+                assert(typeof restoreCreate.details === 'object' && restoreCreate.details !== null, '還原後 CREATE 的 details 非物件');
+                assert(typeof restoreUpdate.details === 'object' && restoreUpdate.details !== null, '還原後 UPDATE 的 details 非物件');
+
+                log(`還原確認 - CREATE 商品名稱：${restoreCreate.details.value.name}`);
+                log(`還原確認 - UPDATE 庫存變動：${restoreUpdate.details.changed_fields.stock.old} 👉 ${restoreUpdate.details.changed_fields.stock.new}`);
+
+                assert(restoreCreate.details.value.name === '模擬品', '還原物件欄位內容錯誤');
+                assert(restoreUpdate.details.changed_fields.stock.old === 10, '還原比對明細內容錯誤');
             });
 
             // 標記測試全部完成
