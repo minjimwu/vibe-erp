@@ -1,0 +1,24 @@
+{
+  "name": "vibe-erp",
+  "version": "1.0.0",
+  "description": "這是一套設計優雅、反應流暢的「純前端」進銷存管理系統。專為需要快速、安全且無須架設後端的個人工作室或微型企業設計。",
+  "main": "convert_old_data.js",
+  "scripts": {
+    "test": "node run_test_headless.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/minjimwu/vibe-erp.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/minjimwu/vibe-erp/issues"
+  },
+  "homepage": "https://github.com/minjimwu/vibe-erp#readme",
+  "devDependencies": {
+    "puppeteer": "^25.1.0"
+  }
+}

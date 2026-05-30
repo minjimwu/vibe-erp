@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="zh-Hant-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>Vibe ERP 庫存同步邏輯單元測試</title>
+    <script src="https://unpkg.com/dexie@latest/dist/dexie.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: #f3f4f6;
+            color: #1f2937;
+            padding: 20px;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        h1 {
+            color: #4f46e5;
+            border-bottom: 2px solid #e5e7eb;
+            padding-bottom: 10px;
+        }
+        .test-case {
+            background: white;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 15px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .test-case.pass {
+            border-left: 5px solid #10b981;
+        }
+        .test-case.fail {
+            border-left: 5px solid #ef4444;
+        }
+        .status {
+            font-weight: bold;
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.85rem;
+        }
+        .status.pass {
+            background: #d1fae5;
+            color: #065f46;
+        }
+        .status.fail {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+        .details {
+            margin-top: 10px;
+            font-family: monospace;
+            background: #f9fafb;
+            padding: 10px;
+            border-radius: 4px;
+            white-space: pre-wrap;
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+    <h1>Vibe ERP 庫存同步邏輯單元測試</h1>
+    <div id="test-results">載入中...</div>
+
+    <script>
+        // 1. 初始化測試資料庫 (不污染正式庫)
+        const db = new Dexie('VibeERP_Test');
+        db.version(3).stores({
+            products: 'id, name, category, cost, price, stock, unit, supplier_id',
+            customers: 'id, name, phone, address',
+            sales: 'id, date, customer_id, product_id, price, qty, total'
+        });
+
+        // 模擬的 app helper (抽離儲存邏輯)
+        const testApp = {
+            async saveSalesOrder(orderId, date, cid, items, originalItems = []) {
+                // 建立原本該單的產品數量 map
+                const originalItemMap = {};
+                originalItems.forEach(item => {
+                    originalItemMap[item.product_id] = (originalItemMap[item.product_id] || 0) + item.qty;
+                });
+
+                const newProductQtySummary = {};
+                items.forEach(item => {
+                    newProductQtySummary[item.pid] = (newProductQtySummary[item.pid] || 0) + item.qty;
+                });
+
+                const affectedProductIds = new Set([
+                    ...Object.keys(originalItemMap),
+                    ...Object.keys(newProductQtySummary)
+                ]);
+
+                const productsToUpdate = {};
+
+                for (const pid of affectedProductIds) {
+                    const oldQty = originalItemMap[pid] || 0;
+                    const newQty = newProductQtySummary[pid] || 0;
+                    const change = oldQty - newQty;
+
+                    if (change === 0) continue;
+
+                    const prod = await db.products.get(pid);
+                    if (!prod) {
+                        throw new Error(`找不到產品代碼：${pid}`);
+                    }
+
+                    const currentStock = Number(prod.stock || 0);
+                    const estStock = currentStock + change;
+
+                    if (estStock < 0) {
+                        throw new Error(`庫存不足！商品「${prod.name}」目前庫存為 ${currentStock}，本次異動將導致預計庫存不足`);
+                    }
+
+                    productsToUpdate[pid] = { change };
+                }
+
+                // 執行寫入與更新庫存交易
+                await db.transaction('rw', db.products, db.sales, async () => {
+                    // 1. 刪除舊明細
+                    await db.sales.where('id').startsWith(orderId).delete();
+
+                    // 2. 寫入新明細
+                    for (let i = 0; i < items.length; i++) {
+                        const item = items[i];
+                        const subId = `${orderId}-${i+1}`;
+                        await db.sales.put({
+                            id: subId,
+                            date: date,
+                            customer_id: cid,
+                            product_id: item.pid,
+                            qty: item.qty,
+                            price: item.price,
+                            total: item.qty * item.price
+                        });
+                    }
+
+                    // 3. 更新庫存
+                    for (const pid in productsToUpdate) {
+                        const updateInfo = productsToUpdate[pid];
+                        const prod = await db.products.get(pid);
+                        if (prod) {
+                            prod.stock = Number(prod.stock || 0) + updateInfo.change;
+                            await db.products.put(prod);
+                        }
+                    }
+                });
+            },
+
+            async deleteSalesOrder(orderId) {
+                const existingItems = await db.sales.where('id').startsWith(orderId).toArray();
+                if (!existingItems.length) {
+                    throw new Error('找不到此出貨單的明細紀錄');
+                }
+
+                await db.transaction('rw', db.products, db.sales, async () => {
+                    await db.sales.where('id').startsWith(orderId).delete();
+                    for (const item of existingItems) {
+                        const prod = await db.products.get(item.product_id);
+                        if (prod) {
+                            prod.stock = Number(prod.stock || 0) + item.qty;
+                            await db.products.put(prod);
+                        }
+                    }
+                });
+            }
+        };
+
+        // 測試框架輔助函數
+        const resultsContainer = document.getElementById('test-results');
+        resultsContainer.innerHTML = '';
+
+        function assert(condition, message) {
+            if (!condition) {
+                throw new Error(message || "Assertion failed");
+            }
+        }
+
+        async function runTestCase(name, fn) {
+            const div = document.createElement('div');
+            div.className = 'test-case';
+            
+            const title = document.createElement('h3');
+            title.style.margin = '0 0 10px 0';
+            title.innerText = name;
+            div.appendChild(title);
+
+            const details = document.createElement('div');
+            details.className = 'details';
+            
+            try {
+                // 每次測試前清空並重建基本資料
+                await db.products.clear();
+                await db.sales.clear();
+                
+                // 置入預設商品庫存
+                await db.products.bulkAdd([
+                    { id: 'P001', name: '測試商品A', category: '類別1', cost: 100, price: 150, stock: 10, unit: '個' },
+                    { id: 'P002', name: '測試商品B', category: '類別1', cost: 200, price: 300, stock: 5, unit: '個' }
+                ]);
+
+                // 執行測試函數
+                const log = [];
+                const logger = (msg) => log.push(msg);
+                await fn(logger);
+                
+                div.classList.add('pass');
+                div.innerHTML += `<span class="status pass">PASS</span>`;
+                details.innerText = log.length ? log.join('\n') : '測試順利通過，沒有任何錯誤。';
+            } catch (err) {
+                div.classList.add('fail');
+                div.innerHTML += `<span class="status fail">FAIL</span>`;
+                details.innerText = `錯誤訊息: ${err.message}\n\n${err.stack}`;
+            }
+            
+            div.appendChild(details);
+            resultsContainer.appendChild(div);
+        }
+
+        async function runAllTests() {
+            // 清理舊資料庫連線並開啟
+            await db.delete();
+            await db.open();
+
+            // 測試案例 1：新增出貨單扣減庫存
+            await runTestCase('測試案例 1：新增出貨單，商品庫存正確扣減', async (log) => {
+                log('新增出貨單 S1，出貨 P001 數量 3，P002 數量 2');
+                await testApp.saveSalesOrder('S1', '2026-05-30', 'C001', [
+                    { pid: 'P001', qty: 3, price: 150 },
+                    { pid: 'P002', qty: 2, price: 300 }
+                ]);
+
+                const p1 = await db.products.get('P001');
+                const p2 = await db.products.get('P002');
+                log(`商品 P001 剩餘庫存：${p1.stock} (預期：7)`);
+                log(`商品 P002 剩餘庫存：${p2.stock} (預期：3)`);
+
+                assert(p1.stock === 7, 'P001 庫存扣減錯誤');
+                assert(p2.stock === 3, 'P002 庫存扣減錯誤');
+
+                const sales = await db.sales.where('id').startsWith('S1').toArray();
+                assert(sales.length === 2, '出貨明細寫入數量錯誤');
+            });
+
+            // 測試案例 2：編輯出貨單（調整出貨數量，庫存自動多扣/回補）
+            await runTestCase('測試案例 2：編輯出貨單，數量變動時庫存自動多扣或回補', async (log) => {
+                log('1. 建立初始出貨單 S2，出貨 P001 數量 3');
+                await testApp.saveSalesOrder('S2', '2026-05-30', 'C001', [
+                    { pid: 'P001', qty: 3, price: 150 }
+                ]);
+
+                let p1 = await db.products.get('P001');
+                assert(p1.stock === 7, '初始庫存扣減錯誤');
+
+                log('2. 編輯 S2，出貨量從 3 個改為 4 個 (增加出貨，應再扣 1)');
+                let originalItems = await db.sales.where('id').startsWith('S2').toArray();
+                await testApp.saveSalesOrder('S2', '2026-05-30', 'C001', [
+                    { pid: 'P001', qty: 4, price: 150 }
+                ], originalItems);
+
+                p1 = await db.products.get('P001');
+                log(`商品 P001 修改為出貨 4 個後之庫存：${p1.stock} (預期：6)`);
+                assert(p1.stock === 6, '增加出貨量時，庫存多扣邏輯錯誤');
+
+                log('3. 編輯 S2，出貨量從 4 個改為 1 個 (減少出貨，應回補 3)');
+                originalItems = await db.sales.where('id').startsWith('S2').toArray();
+                await testApp.saveSalesOrder('S2', '2026-05-30', 'C001', [
+                    { pid: 'P001', qty: 1, price: 150 }
+                ], originalItems);
+
+                p1 = await db.products.get('P001');
+                log(`商品 P001 修改為出貨 1 個後之庫存：${p1.stock} (預期：9)`);
+                assert(p1.stock === 9, '減少出貨量時，庫存回補邏輯錯誤');
+            });
+
+            // 測試案例 3：刪除出貨單（庫存全數回補）
+            await runTestCase('測試案例 3：刪除出貨單，商品庫存應全數自動恢復', async (log) => {
+                log('1. 建立初始出貨單 S3，出貨 P001 數量 3，P002 數量 2');
+                await testApp.saveSalesOrder('S3', '2026-05-30', 'C001', [
+                    { pid: 'P001', qty: 3, price: 150 },
+                    { pid: 'P002', qty: 2, price: 300 }
+                ]);
+
+                log('2. 執行刪除出貨單 S3');
+                await testApp.deleteSalesOrder('S3');
+
+                const p1 = await db.products.get('P001');
+                const p2 = await db.products.get('P002');
+                log(`商品 P001 刪除後庫存：${p1.stock} (預期：10)`);
+                log(`商品 P002 刪除後庫存：${p2.stock} (預期：5)`);
+
+                assert(p1.stock === 10, '刪除出貨單後，P001 庫存未完全回補');
+                assert(p2.stock === 5, '刪除出貨單後，P002 庫存未完全回補');
+
+                const sales = await db.sales.where('id').startsWith('S3').toArray();
+                assert(sales.length === 0, '刪除後，資料庫中仍殘留出貨明細');
+            });
+
+            // 測試案例 4：庫存不足驗證
+            await runTestCase('測試案例 4：當出貨數量大於庫存時，應拒絕出貨並拋出錯誤', async (log) => {
+                log('商品 P002 目前庫存為 5，嘗試出貨 6 個');
+                
+                let didThrow = false;
+                try {
+                    await testApp.saveSalesOrder('S4', '2026-05-30', 'C001', [
+                        { pid: 'P002', qty: 6, price: 300 }
+                    ]);
+                } catch (err) {
+                    didThrow = true;
+                    log(`成功捕獲預期的錯誤：${err.message}`);
+                }
+
+                assert(didThrow, '庫存不足時，未拋出錯誤阻擋');
+                
+                const p2 = await db.products.get('P002');
+                log(`商品 P002 剩餘庫存：${p2.stock} (預期仍為 5)`);
+                assert(p2.stock === 5, '庫存不足時仍錯誤扣減了庫存');
+                
+                const sales = await db.sales.where('id').startsWith('S4').toArray();
+                assert(sales.length === 0, '失敗交易仍寫入了銷售明細');
+            });
+        }
+
+        runAllTests();
+    </script>
+</body>
+</html>

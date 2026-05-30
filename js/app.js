@@ -384,10 +384,18 @@ const app = {
                     <td>${customerName}</td>
                     <td>${order.items.length}</td>
                     <td><span style="color: var(--primary); font-weight: 600;">$${Number(order.total || 0).toLocaleString()}</span></td>
+                    <td class="text-center" style="white-space: nowrap;">
+                        <button class="btn btn-sm btn-outline" style="padding: 4px 8px; margin-right: 4px;" onclick="event.stopPropagation(); app.showModal('sale-modal', '${order.id}')">
+                            <i class="ph ph-pencil-simple"></i> 編輯
+                        </button>
+                        <button class="btn btn-sm btn-outline btn-danger" style="padding: 4px 8px; color: var(--danger); border-color: rgba(220,38,38,0.2);" onclick="event.stopPropagation(); app.deleteSalesOrder('${order.id}')">
+                            <i class="ph ph-trash"></i> 刪除
+                        </button>
+                    </td>
                 </tr>
                 <tr class="detail-row" id="detail-row-${order.id}" style="display: none; background: rgba(0,0,0,0.01);">
                     <td></td>
-                    <td colspan="6">
+                    <td colspan="7">
                         <div style="padding: 12px 18px; border-left: 3px solid var(--primary); background: rgba(0,0,0,0.005); border-radius: 0 8px 8px 0; margin: 4px 0 10px 0;">
                             <h5 style="margin: 0 0 10px 0; font-size: 0.85rem; color: var(--text-muted);">
                                 <i class="ph ph-list-bullets"></i> 出貨品項明細
@@ -426,6 +434,91 @@ const app = {
             if (icon) {
                 icon.style.transform = isHidden ? 'rotate(90deg)' : 'rotate(0deg)';
             }
+        }
+    },
+
+    async deleteSalesOrder(orderId) {
+        // 1. 取得該單號所有原出貨紀錄
+        const existingItems = await db.sales.where('id').startsWith(orderId).toArray();
+        if (!existingItems.length) {
+            await this.alert('找不到此出貨單的明細紀錄');
+            return;
+        }
+
+        // 2. 獲取所有相關產品的資料，計算庫存變動
+        const products = await DB.getAll('products');
+        const productMap = new Map(products.map(p => [p.id, p]));
+        
+        // 3. 準備變動摘要
+        let summaryRowsHtml = '';
+        const itemsToUpdate = []; // { prod, qtyToReturn }
+        
+        for (const item of existingItems) {
+            const prod = productMap.get(item.product_id);
+            const currentStock = prod ? Number(prod.stock || 0) : 0;
+            const change = item.qty; // 刪除出貨單，庫存回補 +qty
+            const estStock = currentStock + change;
+            const prodName = prod ? prod.name : item.product_id;
+            
+            summaryRowsHtml += `
+                <tr>
+                    <td>${prodName} (${item.product_id})</td>
+                    <td>${currentStock}</td>
+                    <td style="color: var(--primary); font-weight: bold;">+${change}</td>
+                    <td>${estStock}</td>
+                </tr>
+            `;
+            
+            itemsToUpdate.push({
+                pid: item.product_id,
+                qtyToReturn: change
+            });
+        }
+        
+        const summaryHtml = `
+            <div style="text-align: left;">
+                <p>確定要刪除出貨單 <strong>${orderId}</strong> 嗎？此操作將會刪除該單所有出貨紀錄，並恢復商品庫存：</p>
+                <table class="data-table" style="width: 100%; margin-top: 12px; font-size: 0.85rem; border-collapse: collapse;">
+                    <thead>
+                        <tr>
+                            <th style="text-align: left; padding: 6px;">產品名稱</th>
+                            <th style="text-align: left; padding: 6px;">目前庫存</th>
+                            <th style="text-align: left; padding: 6px;">本次回補</th>
+                            <th style="text-align: left; padding: 6px;">回補後預估庫存</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${summaryRowsHtml}
+                    </tbody>
+                </table>
+                <p style="margin-top: 12px; color: var(--danger); font-size: 0.85rem; font-weight: bold;">警告：此操作無法復原！</p>
+            </div>
+        `;
+        
+        const confirmed = await this.confirm(summaryHtml, '確認刪除出貨單');
+        if (!confirmed) return;
+        
+        try {
+            await db.transaction('rw', db.products, db.sales, async () => {
+                // 刪除出貨紀錄
+                await db.sales.where('id').startsWith(orderId).delete();
+                
+                // 回補庫存
+                for (const item of itemsToUpdate) {
+                    const prod = await db.products.get(item.pid);
+                    if (prod) {
+                        prod.stock = Number(prod.stock || 0) + item.qtyToReturn;
+                        await db.products.put(prod);
+                    }
+                }
+            });
+            
+            this.showToast('刪除成功');
+            // 重新渲染出貨管理與 Dashboard 頁面
+            this.navigate(this.currentView);
+        } catch (err) {
+            console.error(err);
+            await this.alert('刪除失敗：' + err.message);
         }
     },
 
@@ -887,7 +980,7 @@ const app = {
     },
 
     // --- Modal Logic (Basic support for adding Product/Purchase/Sale) ---
-    async showModal(type) {
+    async showModal(type, extraData) {
         const overlay = document.getElementById('modal-container');
         const mTitle = document.getElementById('modal-title');
         const mBody = document.getElementById('modal-body');
@@ -1069,18 +1162,41 @@ const app = {
                 return true;
             };
         } else if (type === 'sale-modal') {
-            mTitle.innerText = '新增出貨紀錄';
-            const tid = this.generateID('S');
+            const isEdit = !!extraData;
+            mTitle.innerText = isEdit ? '編輯出貨紀錄' : '新增出貨紀錄';
+            
+            // 如果是編輯模式，讀取該 orderId 的所有舊項目
+            let existingItems = [];
+            if (isEdit) {
+                existingItems = await db.sales.where('id').startsWith(extraData).toArray();
+            }
+            
+            const tid = isEdit ? extraData : this.generateID('S');
+            const defaultDate = (isEdit && existingItems.length > 0) 
+                ? existingItems[0].date 
+                : new Date().toISOString().slice(0, 10);
+            const defaultCid = (isEdit && existingItems.length > 0)
+                ? existingItems[0].customer_id
+                : '';
+
             const customers = await DB.getAll('customers');
             const products = await DB.getAll('products');
 
+            // 建立原本該單的產品數量 map，便於編輯模式下算可用庫存
+            const originalItemMap = {};
+            if (isEdit && existingItems.length > 0) {
+                existingItems.forEach(item => {
+                    originalItemMap[item.product_id] = (originalItemMap[item.product_id] || 0) + item.qty;
+                });
+            }
+
             html = `
                 <div class="form-group"><label>出貨單號</label><input type="text" id="m-id" class="form-control" value="${tid}" readonly></div>
-                <div class="form-group"><label>日期</label><input type="date" id="m-date" class="form-control" value="${new Date().toISOString().slice(0, 10)}"></div>
+                <div class="form-group"><label>日期</label><input type="date" id="m-date" class="form-control" value="${defaultDate}"></div>
                 <div class="form-group" style="position: relative;">
                     <label>客戶</label>
                     <input type="text" id="m-cid-search" class="form-control" placeholder="輸入客戶姓名或編號搜尋..." autocomplete="off">
-                    <input type="hidden" id="m-cid">
+                    <input type="hidden" id="m-cid" value="${defaultCid}">
                     <div id="m-cid-dropdown" class="autocomplete-dropdown" style="display: none;"></div>
                 </div>
                 <div style="margin-top: 20px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center;">
@@ -1100,7 +1216,7 @@ const app = {
                 const categories = [...new Set(products.map(p => p.category))].filter(Boolean).sort();
                 const catOptions = categories.map(cat => `<option value="${cat}">${cat}</option>`).join('');
 
-                const addItemRow = () => {
+                const addItemRow = (prefillData = null) => {
                     const rowId = 'row-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
                     const itemHtml = `
                         <div class="sale-item-row" id="${rowId}" style="display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; margin-bottom: 12px; border-bottom: 1px dashed rgba(0,0,0,0.05); padding-bottom: 10px;">
@@ -1143,7 +1259,10 @@ const app = {
                         const selectedCat = catSel.value;
                         const filtered = products.filter(p => p.category === selectedCat);
                         pidSel.innerHTML = '<option value="">請選擇產品...</option>' + 
-                            filtered.map(p => `<option value="${p.id}" data-price="${p.price}" data-stock="${p.stock}">${p.name} (${p.id})</option>`).join('');
+                            filtered.map(p => {
+                                const availableStock = Number(p.stock || 0) + (originalItemMap[p.id] || 0);
+                                return `<option value="${p.id}" data-price="${p.price}" data-stock="${availableStock}">${p.name} (${p.id})</option>`;
+                            }).join('');
                         stockInfo.innerText = '';
                     };
 
@@ -1159,15 +1278,49 @@ const app = {
                             stockInfo.innerText = '';
                         }
                     };
+
+                    // 若有預填資料，載入預填
+                    if (prefillData) {
+                        const prod = products.find(p => p.id === prefillData.product_id);
+                        if (prod) {
+                            catSel.value = prod.category || '';
+                            const filtered = products.filter(p => p.category === prod.category);
+                            pidSel.innerHTML = '<option value="">請選擇產品...</option>' + 
+                                filtered.map(p => {
+                                    const availableStock = Number(p.stock || 0) + (originalItemMap[p.id] || 0);
+                                    return `<option value="${p.id}" data-price="${p.price}" data-stock="${availableStock}">${p.name} (${p.id})</option>`;
+                                }).join('');
+                            pidSel.value = prefillData.product_id;
+                            
+                            const availableStock = Number(prod.stock || 0) + (originalItemMap[prefillData.product_id] || 0);
+                            stockInfo.innerText = `(庫存: ${availableStock})`;
+                            qtyInp.max = availableStock;
+                            qtyInp.value = prefillData.qty;
+                            priceInp.value = prefillData.price;
+                        }
+                    }
                 };
 
                 addBtn.onclick = () => addItemRow();
-                addItemRow(); // 預設加一筆
+
+                if (isEdit && existingItems.length > 0) {
+                    existingItems.forEach(item => addItemRow(item));
+                } else {
+                    addItemRow(); // 預設加一筆
+                }
 
                 // Autocomplete for Customer search
                 const cidSearch = document.getElementById('m-cid-search');
                 const cidHidden = document.getElementById('m-cid');
                 const cidDropdown = document.getElementById('m-cid-dropdown');
+
+                // 預填客戶資訊 (編輯模式下)
+                if (isEdit && existingItems.length > 0) {
+                    const cust = customers.find(c => c.id === defaultCid);
+                    if (cust) {
+                        cidSearch.value = `${cust.name} (${cust.id})`;
+                    }
+                }
 
                 cidSearch.oninput = (e) => {
                     const query = e.target.value.trim().toLowerCase();
@@ -1222,8 +1375,8 @@ const app = {
                 const rows = document.querySelectorAll('.sale-item-row');
                 if (!rows.length) { await this.alert('請至少新增一個品項'); return false; }
                 
-                const items = [];
-                const productQtySummary = {};
+                const newItems = [];
+                const newProductQtySummary = {};
                 
                 for (const row of rows) {
                     const pid = row.querySelector('.item-pid').value;
@@ -1234,41 +1387,134 @@ const app = {
                     if (qty <= 0) { await this.alert('數量必須大於 0'); return false; }
                     if (price < 0) { await this.alert('售價單價不能小於 0'); return false; }
                     
-                    items.push({ pid, qty, price });
-                    productQtySummary[pid] = (productQtySummary[pid] || 0) + qty;
+                    newItems.push({ pid, qty, price });
+                    newProductQtySummary[pid] = (newProductQtySummary[pid] || 0) + qty;
                 }
                 
-                // 檢查庫存量 (合併加總後)
-                for (const pid in productQtySummary) {
-                    const prod = await db.products.get(pid);
-                    const totalQty = productQtySummary[pid];
-                    if (!prod || prod.stock < totalQty) {
-                        await this.alert(`庫存不足！商品「${prod ? prod.name : pid}」的目前庫存僅剩 ${prod ? prod.stock : 0}，但您的出貨總量為 ${totalQty}`);
+                // 檢查庫存量，並建立變動列表
+                const affectedProductIds = new Set([
+                    ...Object.keys(originalItemMap),
+                    ...Object.keys(newProductQtySummary)
+                ]);
+                
+                const changeDetails = [];
+                const productsToUpdate = {}; // pid -> { change }
+                
+                for (const pid of affectedProductIds) {
+                    const oldQty = originalItemMap[pid] || 0;
+                    const newQty = newProductQtySummary[pid] || 0;
+                    const change = oldQty - newQty; // 對庫存的影響：庫存_新 = 庫存_舊 + oldQty - newQty
+                    
+                    if (change === 0) continue;
+                    
+                    const prod = products.find(p => p.id === pid) || await db.products.get(pid);
+                    if (!prod) {
+                        await this.alert(`找不到產品代碼：${pid}`);
                         return false;
                     }
-                }
-                
-                // 儲存與更新庫存
-                for (let i = 0; i < items.length; i++) {
-                    const item = items[i];
-                    const subId = `${id}-${i+1}`;
-                    await DB.save('sales', {
-                        id: subId,
-                        date: date,
-                        customer_id: cid,
-                        product_id: item.pid,
-                        qty: item.qty,
-                        price: item.price,
-                        total: item.qty * item.price
+                    
+                    const currentStock = Number(prod.stock || 0);
+                    const estStock = currentStock + change;
+                    
+                    if (estStock < 0) {
+                        await this.alert(`庫存不足！商品「${prod.name}」目前庫存為 ${currentStock}，若在此單出貨 ${newQty}（原本出貨 ${oldQty}），將導致預計庫存不足（預計為 ${estStock}）`);
+                        return false;
+                    }
+                    
+                    changeDetails.push({
+                        name: prod.name,
+                        id: prod.id,
+                        currentStock: currentStock,
+                        change: change,
+                        estStock: estStock
                     });
                     
-                    const prod = await db.products.get(item.pid);
-                    if (prod) {
-                        prod.stock = Number(prod.stock || 0) - item.qty;
-                        await DB.save('products', prod);
-                    }
+                    productsToUpdate[pid] = {
+                        change: change
+                    };
                 }
-                return true;
+                
+                // 如果有變動，顯示本次改動總結的畫面
+                if (changeDetails.length > 0) {
+                    let summaryRowsHtml = '';
+                    changeDetails.forEach(item => {
+                        const changeStr = item.change > 0 ? `+${item.change}` : `${item.change}`;
+                        const changeColor = item.change > 0 ? 'var(--primary)' : 'var(--danger)';
+                        summaryRowsHtml += `
+                            <tr>
+                                <td>${item.name} (${item.id})</td>
+                                <td>${item.currentStock}</td>
+                                <td style="color: ${changeColor}; font-weight: bold;">${changeStr}</td>
+                                <td>${item.estStock}</td>
+                            </tr>
+                        `;
+                    });
+                    
+                    const summaryHtml = `
+                        <div style="text-align: left;">
+                            <p>請確認以下商品的庫存變動：</p>
+                            <table class="data-table" style="width: 100%; margin-top: 12px; font-size: 0.85rem; border-collapse: collapse;">
+                                <thead>
+                                    <tr>
+                                        <th style="text-align: left; padding: 6px;">產品名稱</th>
+                                        <th style="text-align: left; padding: 6px;">目前庫存</th>
+                                        <th style="text-align: left; padding: 6px;">本次變動</th>
+                                        <th style="text-align: left; padding: 6px;">預計新庫存</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${summaryRowsHtml}
+                                </tbody>
+                            </table>
+                            <p style="margin-top: 12px; color: var(--text-muted); font-size: 0.85rem;">按下「確認」將儲存此出貨單並更新庫存。</p>
+                        </div>
+                    `;
+                    
+                    const confirmed = await this.confirm(summaryHtml, isEdit ? '編輯出貨庫存變動確認' : '新增出貨庫存變動確認');
+                    if (!confirmed) return false; // 使用者按取消，不關閉 Modal
+                }
+                
+                // 執行正式儲存與更新庫存
+                try {
+                    await db.transaction('rw', db.products, db.sales, async () => {
+                        // 1. 如果是編輯模式，先刪除該 orderId 對應的所有舊銷售明細
+                        if (isEdit) {
+                            await db.sales.where('id').startsWith(tid).delete();
+                        }
+                        
+                        // 2. 寫入新銷售明細
+                        for (let i = 0; i < newItems.length; i++) {
+                            const item = newItems[i];
+                            const subId = `${tid}-${i+1}`;
+                            await db.sales.put({
+                                id: subId,
+                                date: date,
+                                customer_id: cid,
+                                product_id: item.pid,
+                                qty: item.qty,
+                                price: item.price,
+                                total: item.qty * item.price
+                            });
+                        }
+                        
+                        // 3. 更新所有庫存變動
+                        for (const pid in productsToUpdate) {
+                            const updateInfo = productsToUpdate[pid];
+                            const prod = await db.products.get(pid);
+                            if (prod) {
+                                prod.stock = Number(prod.stock || 0) + updateInfo.change;
+                                await db.products.put(prod);
+                            }
+                        }
+                    });
+                    
+                    this._modalSuccessMsg = isEdit ? '編輯成功' : '新增成功';
+                    return true;
+                } catch (err) {
+                    console.error(err);
+                    await this.alert('儲存失敗：' + err.message);
+                    return false;
+                }
             };
         }
 
@@ -1280,7 +1526,7 @@ const app = {
                 const success = await saveHandler();
                 if (success === true) {
                     this.hideModal();
-                    this.showToast('新增成功');
+                    this.showToast(this._modalSuccessMsg || '儲存成功');
                     this.navigate(this.currentView);
                 }
             }
