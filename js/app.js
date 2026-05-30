@@ -1074,17 +1074,14 @@ const app = {
             const customers = await DB.getAll('customers');
             const products = await DB.getAll('products');
 
-            const cOptions = customers.map(c => `<option value="${c.id}">${c.name} (${c.id})</option>`).join('');
-
             html = `
                 <div class="form-group"><label>出貨單號</label><input type="text" id="m-id" class="form-control" value="${tid}" readonly></div>
                 <div class="form-group"><label>日期</label><input type="date" id="m-date" class="form-control" value="${new Date().toISOString().slice(0, 10)}"></div>
-                <div class="form-group">
+                <div class="form-group" style="position: relative;">
                     <label>客戶</label>
-                    <select id="m-cid" class="form-control">
-                        <option value="">請選擇客戶...</option>
-                        ${cOptions}
-                    </select>
+                    <input type="text" id="m-cid-search" class="form-control" placeholder="輸入客戶姓名或編號搜尋..." autocomplete="off">
+                    <input type="hidden" id="m-cid">
+                    <div id="m-cid-dropdown" class="autocomplete-dropdown" style="display: none;"></div>
                 </div>
                 <div style="margin-top: 20px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center;">
                     <h4 style="margin: 0; font-size: 0.95rem; color: var(--primary-color);">出貨明細</h4>
@@ -1166,6 +1163,53 @@ const app = {
 
                 addBtn.onclick = () => addItemRow();
                 addItemRow(); // 預設加一筆
+
+                // Autocomplete for Customer search
+                const cidSearch = document.getElementById('m-cid-search');
+                const cidHidden = document.getElementById('m-cid');
+                const cidDropdown = document.getElementById('m-cid-dropdown');
+
+                cidSearch.oninput = (e) => {
+                    const query = e.target.value.trim().toLowerCase();
+                    if (query.length < 1) {
+                        cidDropdown.style.display = 'none';
+                        cidHidden.value = '';
+                        return;
+                    }
+
+                    const filtered = customers.filter(c => 
+                        (c.name && c.name.toLowerCase().includes(query)) || 
+                        (c.id && c.id.toLowerCase().includes(query))
+                    );
+
+                    if (filtered.length === 0) {
+                        cidDropdown.innerHTML = '<div style="padding: 8px 12px; color: var(--text-muted); font-size: 0.85rem;">找不到相符的客戶</div>';
+                    } else {
+                        cidDropdown.innerHTML = filtered.map(c => `
+                            <div class="autocomplete-item" data-id="${c.id}" data-name="${c.name}">
+                                <strong>${c.name}</strong> <span style="font-size: 0.8rem; color: var(--text-muted);">(${c.id})</span>
+                            </div>
+                        `).join('');
+
+                        cidDropdown.querySelectorAll('.autocomplete-item').forEach(item => {
+                            item.onclick = () => {
+                                const cid = item.getAttribute('data-id');
+                                const name = item.getAttribute('data-name');
+                                cidSearch.value = `${name} (${cid})`;
+                                cidHidden.value = cid;
+                                cidDropdown.style.display = 'none';
+                            };
+                        });
+                    }
+                    cidDropdown.style.display = 'block';
+                };
+
+                // Dismiss dropdown on outside clicks
+                document.addEventListener('click', (e) => {
+                    if (cidSearch && cidDropdown && e.target !== cidSearch && !cidDropdown.contains(e.target)) {
+                        cidDropdown.style.display = 'none';
+                    }
+                });
             };
 
             saveHandler = async () => {

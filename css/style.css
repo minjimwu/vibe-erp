@@ -531,3 +531,32 @@ h6 {
 .t-template {
     display: none;
 }
+
+/* Autocomplete search dropdown styling */
+.autocomplete-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: rgba(255, 255, 255, 0.98);
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    border-radius: 8px;
+    max-height: 200px;
+    overflow-y: auto;
+    z-index: 1000;
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1);
+    backdrop-filter: blur(8px);
+    margin-top: 4px;
+}
+.autocomplete-item {
+    padding: 8px 12px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    transition: background 0.15s;
+    color: var(--text-color);
+    text-align: left;
+}
+.autocomplete-item:hover {
+    background: rgba(79, 70, 229, 0.08);
+    color: var(--primary-color);
+}
