@@ -796,6 +796,45 @@
                 assert(logDetail.items[0].product_name === '測試商品A', '日誌快照中未正確保留商品名稱');
             });
 
+            await runTestCase('測試案例 13：驗證一鍵匯入舊系統資料功能已從 UI 中移除，且相關歷史資料已清理', async (log) => {
+                // 1. UI 元素與程式碼移除檢查
+                if (window.indexHtmlContent) {
+                    log('1. 讀取並解析注入之 index.html 原始碼');
+                    const parser = new DOMParser();
+                    const doc = parser.parseFromString(window.indexHtmlContent, 'text/html');
+
+                    log('2. 驗證 index.html 中不包含 settings-import-container 容器');
+                    const container = doc.getElementById('settings-import-container');
+                    log(`settings-import-container 是否不存在：${container === null}`);
+                    assert(container === null, 'index.html 中依然存在 settings-import-container 容器！');
+
+                    log('3. 驗證 index.html 中未引入 js/converted-data.js 檔案');
+                    const scripts = Array.from(doc.querySelectorAll('script'));
+                    const hasConvertedScript = scripts.some(s => s.getAttribute('src') === 'js/converted-data.js');
+                    log(`是否有引入 converted-data.js：${hasConvertedScript}`);
+                    assert(hasConvertedScript === false, 'index.html 中依然引入了 js/converted-data.js！');
+                } else {
+                    log('⚠️ 未偵測到 indexHtmlContent (非無頭瀏覽器環境)，略過 index.html DOM 驗證。');
+                }
+
+                // 2. 本機檔案與 mydata 資料夾移除檢查
+                if (window.fsCheck) {
+                    log('4. 驗證 mydata/ 目錄已徹底刪除');
+                    log(`mydata/ 是否已不存在：${!window.fsCheck.mydataExists}`);
+                    assert(window.fsCheck.mydataExists === false, 'mydata/ 資料夾依然存在！');
+
+                    log('5. 驗證 convert_old_data.js 已刪除');
+                    log(`convert_old_data.js 是否已不存在：${!window.fsCheck.convertScriptExists}`);
+                    assert(window.fsCheck.convertScriptExists === false, 'convert_old_data.js 檔案依然存在！');
+
+                    log('6. 驗證 js/converted-data.js 已刪除');
+                    log(`js/converted-data.js 是否已不存在：${!window.fsCheck.convertedDataExists}`);
+                    assert(window.fsCheck.convertedDataExists === false, 'js/converted-data.js 檔案依然存在！');
+                } else {
+                    log('⚠️ 未偵測到 fsCheck (非無頭瀏覽器環境)，略過本機檔案移除驗證。請在終端機執行 npm test 完成完整本機驗證。');
+                }
+            });
+
             // 標記測試全部完成
             const completeDiv = document.createElement('div');
             completeDiv.id = 'tests-complete';

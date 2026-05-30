@@ -1342,77 +1342,7 @@ const app = {
 
     // --- Settings 頁面渲染（含一鍵匯入舊資料） ---
     async renderSettings() {
-        const container = document.getElementById('settings-import-container');
-        if (!container) return;
-
-        // 判斷是否已載入 converted-data.js
-        if (typeof ConvertedData === 'undefined') {
-            container.innerHTML = `
-                <div style="color: var(--text-muted); font-size: 0.9rem; margin-top: 12px;">
-                    <i class="ph ph-info"></i>
-                    若要一鍵匯入舊系統資料，請先在 index.html 中加入<br>
-                    <code style="background:rgba(0,0,0,0.05);padding:2px 6px;border-radius:4px;">&lt;script src="js/converted-data.js"&gt;&lt;/script&gt;</code>
-                    後重新整理頁面。
-                </div>`;
-            return;
-        }
-
-        const p = (ConvertedData.products || []).length;
-        const s = (ConvertedData.suppliers || []).length;
-        const c = (ConvertedData.customers || []).length;
-        const sa = (ConvertedData.sales || []).length;
-
-        container.innerHTML = `
-            <div class="converted-import-panel" style="margin-top:24px;padding:20px;border:1px solid rgba(79,70,229,0.3);border-radius:12px;background:rgba(79,70,229,0.04);">
-                <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
-                    <i class="ph ph-file-xls" style="font-size:1.5rem;color:var(--primary);"></i>
-                    <h4 style="margin:0;color:var(--primary);">一鍵匯入舊系統資料</h4>
-                </div>
-                <p style="font-size:0.9rem;color:var(--text-muted);margin-bottom:16px;">
-                    已偵測到已轉換的舊系統資料：
-                    商品 <strong>${p}</strong> 筆、廠商 <strong>${s}</strong> 筆、
-                    客戶 <strong>${c}</strong> 筆、出貨紀錄 <strong>${sa}</strong> 筆。
-                </p>
-                <div style="display:flex;gap:10px;">
-                    <button class="btn btn-primary" id="btn-do-converted-import">
-                        <i class="ph ph-upload-simple"></i> 立即匯入
-                    </button>
-                    <button class="btn btn-outline" onclick="app.navigate('dashboard')">
-                        <i class="ph ph-chart-bar"></i> 匯入後查看總覽
-                    </button>
-                </div>
-                <div id="import-progress" style="margin-top:12px;font-size:0.85rem;color:var(--text-muted);"></div>
-            </div>`;
-
-        document.getElementById('btn-do-converted-import').onclick = async () => {
-            const btn = document.getElementById('btn-do-converted-import');
-            const progress = document.getElementById('import-progress');
-            btn.disabled = true;
-            btn.innerHTML = '<i class="ph ph-circle-notch ph-spin"></i> 匯入中...';
-
-            try {
-                progress.textContent = '正在寫入商品資料...';
-                await DB.bulkInsert('products', ConvertedData.products);
-
-                progress.textContent = '正在寫入廠商資料...';
-                await DB.bulkInsert('suppliers', ConvertedData.suppliers);
-
-                progress.textContent = '正在寫入客戶資料...';
-                await DB.bulkInsert('customers', ConvertedData.customers);
-
-                progress.textContent = '正在寫入出貨紀錄...';
-                await DB.bulkInsert('sales', ConvertedData.sales);
-
-                progress.innerHTML = '<span style="color:var(--secondary)"><i class="ph ph-check-circle"></i> 匯入成功！所有舊系統資料已寫入本系統。</span>';
-                btn.innerHTML = '<i class="ph ph-check"></i> 已匯入';
-                this.showToast('舊系統資料匯入成功！');
-            } catch (err) {
-                console.error(err);
-                progress.innerHTML = '<span style="color:var(--danger)">匯入發生錯誤，請查看 Console 詳細訊息。</span>';
-                btn.disabled = false;
-                btn.innerHTML = '<i class="ph ph-upload-simple"></i> 重試';
-            }
-        };
+        // 設定頁面由 index.html 的 tpl-settings 範本直接靜態渲染，此處無須額外動態邏輯
     },
 
     // --- Modal Logic (Basic support for adding Product/Purchase/Sale) ---

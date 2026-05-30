@@ -12,6 +12,23 @@ const path = require('path');
         
         // 載入 test.html (使用絕對 file:// 路徑)
         const testHtmlPath = 'file://' + path.resolve(__dirname, 'test.html');
+        
+        // 讀取檔案狀態並注入至頁面以利 test.html 執行檔案存在性與 DOM 結構驗證
+        const fs = require('fs');
+        const mydataExists = fs.existsSync(path.resolve(__dirname, 'mydata'));
+        const convertScriptExists = fs.existsSync(path.resolve(__dirname, 'convert_old_data.js'));
+        const convertedDataExists = fs.existsSync(path.resolve(__dirname, 'js/converted-data.js'));
+        const indexHtmlContent = fs.readFileSync(path.resolve(__dirname, 'index.html'), 'utf8');
+        
+        await page.evaluateOnNewDocument((mydata, convert, converted, html) => {
+            window.fsCheck = {
+                mydataExists: mydata,
+                convertScriptExists: convert,
+                convertedDataExists: converted
+            };
+            window.indexHtmlContent = html;
+        }, mydataExists, convertScriptExists, convertedDataExists, indexHtmlContent);
+
         await page.goto(testHtmlPath);
         
         // 等待測試結果 DOM 載入與測試執行完畢
