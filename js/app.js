@@ -1302,7 +1302,7 @@ const app = {
     },
     showDialog(message, title, showCancel) {
         document.getElementById('dialog-title').innerText = title;
-        document.getElementById('dialog-body').innerText = message;
+        document.getElementById('dialog-body').innerHTML = message;
         document.getElementById('dialog-cancel-btn').style.display = showCancel ? 'inline-block' : 'none';
         document.getElementById('dialog-container').style.display = 'flex';
         return new Promise(resolve => {
