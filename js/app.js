@@ -543,7 +543,7 @@ const app = {
         if (!confirmed) return;
         
         try {
-            await db.transaction('rw', db.products, db.sales, db.audit_logs, async () => {
+            await db.transaction('rw', db.products, db.sales, db.customers, db.audit_logs, async () => {
                 // 刪除出貨紀錄
                 await db.sales.where('id').startsWith(orderId).delete();
                 
@@ -556,7 +556,20 @@ const app = {
                     }
                 }
                 
-                await this.addAuditLog('DELETE', 'sale', orderId, `刪除出貨單 ${orderId}`, existingItems, null);
+                const cid = existingItems[0]?.customer_id;
+                const customer = cid ? await db.customers.get(cid) : null;
+                const customerName = customer ? customer.name : cid;
+
+                const enrichedItems = await Promise.all(existingItems.map(async it => {
+                    const prod = await db.products.get(it.product_id);
+                    return {
+                        ...it,
+                        product_name: prod ? prod.name : '未知產品'
+                    };
+                }));
+
+                const logOld = { customer_id: cid, customer_name: customerName, items: enrichedItems };
+                await this.addAuditLog('DELETE', 'sale', orderId, `刪除出貨單 ${orderId}`, logOld, null);
             });
             
             this.showToast('刪除成功');
@@ -635,7 +648,7 @@ const app = {
         if (!confirmed) return;
         
         try {
-            await db.transaction('rw', db.products, db.purchases, db.audit_logs, async () => {
+            await db.transaction('rw', db.products, db.purchases, db.suppliers, db.audit_logs, async () => {
                 // 刪除進貨紀錄
                 await db.purchases.where('id').startsWith(orderId).delete();
                 
@@ -648,7 +661,20 @@ const app = {
                     }
                 }
                 
-                await this.addAuditLog('DELETE', 'purchase', orderId, `刪除進貨單 ${orderId}`, existingItems, null);
+                const sid = existingItems[0]?.supplier_id;
+                const supplier = sid ? await db.suppliers.get(sid) : null;
+                const supplierName = supplier ? supplier.name : sid;
+
+                const enrichedItems = await Promise.all(existingItems.map(async it => {
+                    const prod = await db.products.get(it.product_id);
+                    return {
+                        ...it,
+                        product_name: prod ? prod.name : '未知產品'
+                    };
+                }));
+
+                const logOld = { supplier_id: sid, supplier_name: supplierName, items: enrichedItems };
+                await this.addAuditLog('DELETE', 'purchase', orderId, `刪除進貨單 ${orderId}`, logOld, null);
             });
             
             this.showToast('刪除成功');
@@ -1246,31 +1272,50 @@ const app = {
                 zip_code: '郵遞區號', address: '地址', remark: '備註',
                 remarks: '備註', email: 'Email', salesperson: '服務員',
                 birthday: '生日', gender: '性別', vip_card: '貴賓卡號',
-                member_card: '會員卡號'
+                member_card: '會員卡號', items: '明細品項',
+                supplier_name: '廠商名稱', customer_name: '客戶名稱'
+            };
+
+            const formatValue = (field, val) => {
+                if (val === undefined || val === null) return '(空)';
+                if (field === 'items' && Array.isArray(val)) {
+                    if (val.length === 0) return '(無品項)';
+                    return val.map(item => {
+                        const name = item.product_name || item.pid || '未知商品';
+                        const qty = item.qty || 0;
+                        const price = item.cost !== undefined ? item.cost : (item.price !== undefined ? item.price : 0);
+                        const priceLabel = item.cost !== undefined ? '進價' : '售價';
+                        return `• ${name} (${qty} 個, ${priceLabel}: ${price})`;
+                    }).join('<br>');
+                }
+                if (typeof val === 'object') {
+                    return `<pre style="margin:0; font-family:monospace; font-size:0.8rem; white-space:pre-wrap; word-break:break-all; background:none; padding:0; border:none; max-width:100%;">${JSON.stringify(val, null, 2)}</pre>`;
+                }
+                return val;
             };
 
             for (const field in diff) {
-                const oldVal = diff[field].old === undefined || diff[field].old === null ? '(空)' : diff[field].old;
-                const newVal = diff[field].new === undefined || diff[field].new === null ? '(空)' : diff[field].new;
+                const oldText = formatValue(field, diff[field].old);
+                const newText = formatValue(field, diff[field].new);
                 
                 rowsHtml += `
                     <tr>
-                        <td style="padding: 6px; font-weight: bold;">${fieldNames[field] || field}</td>
-                        <td style="padding: 6px; color: var(--danger); text-decoration: line-through;">${typeof oldVal === 'object' ? JSON.stringify(oldVal) : oldVal}</td>
-                        <td style="padding: 6px; color: var(--primary); font-weight: bold;">➔ ${typeof newVal === 'object' ? JSON.stringify(newVal) : newVal}</td>
+                        <td style="padding: 8px 6px; font-weight: bold; vertical-align: top; word-break: break-word;">${fieldNames[field] || field}</td>
+                        <td style="padding: 8px 6px; color: var(--danger); text-decoration: line-through; vertical-align: top; word-break: break-all; white-space: pre-wrap;">${oldText}</td>
+                        <td style="padding: 8px 6px; color: var(--primary); font-weight: bold; vertical-align: top; word-break: break-all; white-space: pre-wrap;">➔ ${newText}</td>
                     </tr>
                 `;
             }
 
             html = `
-                <div style="text-align: left;">
-                    <p style="margin-bottom: 8px;"><strong>日誌說明：</strong>${log.description}</p>
-                    <table class="data-table" style="width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-top: 8px;">
+                <div style="text-align: left; max-width: 100%; overflow-x: hidden;">
+                    <p style="margin-bottom: 8px; font-size: 0.9rem;"><strong>日誌說明：</strong>${log.description}</p>
+                    <table class="data-table" style="width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 0.85rem; margin-top: 8px;">
                         <thead>
                             <tr>
-                                <th style="padding: 6px; text-align: left;">變更欄位</th>
-                                <th style="padding: 6px; text-align: left;">修改前</th>
-                                <th style="padding: 6px; text-align: left;">修改後</th>
+                                <th style="padding: 6px; text-align: left; width: 25%;">變更欄位</th>
+                                <th style="padding: 6px; text-align: left; width: 37.5%;">修改前</th>
+                                <th style="padding: 6px; text-align: left; width: 37.5%;">修改後</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -1435,7 +1480,14 @@ const app = {
             // 如果是編輯模式，讀取該 orderId 的所有舊項目
             let existingItems = [];
             if (isEdit) {
-                existingItems = await db.purchases.where('id').startsWith(extraData).toArray();
+                const rawItems = await db.purchases.where('id').startsWith(extraData).toArray();
+                existingItems = await Promise.all(rawItems.map(async item => {
+                    const prod = await db.products.get(item.product_id);
+                    return {
+                        ...item,
+                        product_name: prod ? prod.name : '未知產品'
+                    };
+                }));
             }
 
             const tid = isEdit ? extraData : this.generateID('P');
@@ -1608,7 +1660,9 @@ const app = {
                     if (qty <= 0) { await this.alert('數量必須大於 0'); return false; }
                     if (cost < 0) { await this.alert('單位成本不能小於 0'); return false; }
                     
-                    newItems.push({ pid, qty, cost });
+                    const prod = products.find(p => p.id === pid);
+                    const prodName = prod ? prod.name : '';
+                    newItems.push({ pid, product_name: prodName, qty, cost });
                     newProductQtySummary[pid] = (newProductQtySummary[pid] || 0) + qty;
                 }
                 
@@ -1733,7 +1787,11 @@ const app = {
                         const supplierName = supplier ? supplier.name : sid;
                         const action = isEdit ? 'UPDATE' : 'CREATE';
                         const desc = isEdit ? `編輯進貨單 ${tid} (廠商: ${supplierName})` : `新增進貨單 ${tid} (廠商: ${supplierName})`;
-                        await this.addAuditLog(action, 'purchase', tid, desc, isEdit ? existingItems : null, newItems);
+                        
+                        const logOld = isEdit ? { supplier_id: defaultSid, supplier_name: suppliers.find(s => s.id === defaultSid)?.name || defaultSid, items: existingItems } : null;
+                        const logNew = { supplier_id: sid, supplier_name: supplierName, items: newItems };
+                        
+                        await this.addAuditLog(action, 'purchase', tid, desc, logOld, logNew);
                     });
                     
                     this._modalSuccessMsg = isEdit ? '編輯成功' : '新增成功';
@@ -1751,7 +1809,14 @@ const app = {
             // 如果是編輯模式，讀取該 orderId 的所有舊項目
             let existingItems = [];
             if (isEdit) {
-                existingItems = await db.sales.where('id').startsWith(extraData).toArray();
+                const rawItems = await db.sales.where('id').startsWith(extraData).toArray();
+                existingItems = await Promise.all(rawItems.map(async item => {
+                    const prod = await db.products.get(item.product_id);
+                    return {
+                        ...item,
+                        product_name: prod ? prod.name : '未知產品'
+                    };
+                }));
             }
             
             const tid = isEdit ? extraData : this.generateID('S');
@@ -1970,7 +2035,9 @@ const app = {
                     if (qty <= 0) { await this.alert('數量必須大於 0'); return false; }
                     if (price < 0) { await this.alert('售價單價不能小於 0'); return false; }
                     
-                    newItems.push({ pid, qty, price });
+                    const prod = products.find(p => p.id === pid);
+                    const prodName = prod ? prod.name : '';
+                    newItems.push({ pid, product_name: prodName, qty, price });
                     newProductQtySummary[pid] = (newProductQtySummary[pid] || 0) + qty;
                 }
                 
@@ -2095,7 +2162,11 @@ const app = {
                         const customerName = customer ? customer.name : cid;
                         const action = isEdit ? 'UPDATE' : 'CREATE';
                         const desc = isEdit ? `編輯出貨單 ${tid} (客戶: ${customerName})` : `新增出貨單 ${tid} (客戶: ${customerName})`;
-                        await this.addAuditLog(action, 'sale', tid, desc, isEdit ? existingItems : null, newItems);
+                        
+                        const logOld = isEdit ? { customer_id: defaultCid, customer_name: customers.find(c => c.id === defaultCid)?.name || defaultCid, items: existingItems } : null;
+                        const logNew = { customer_id: cid, customer_name: customerName, items: newItems };
+                        
+                        await this.addAuditLog(action, 'sale', tid, desc, logOld, logNew);
                     });
                     
                     this._modalSuccessMsg = isEdit ? '編輯成功' : '新增成功';

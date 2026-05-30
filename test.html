@@ -203,7 +203,7 @@
                     productsToUpdate[pid] = { change };
                 }
 
-                await db.transaction('rw', db.products, db.purchases, db.audit_logs, async () => {
+                await db.transaction('rw', db.products, db.purchases, db.suppliers, db.audit_logs, async () => {
                     await db.purchases.where('id').startsWith(orderId).delete();
 
                     for (let i = 0; i < items.length; i++) {
@@ -231,7 +231,30 @@
 
                     const action = originalItems.length > 0 ? 'UPDATE' : 'CREATE';
                     const desc = action === 'UPDATE' ? `編輯進貨單 ${orderId}` : `新增進貨單 ${orderId}`;
-                    await this.addAuditLog(action, 'purchase', orderId, desc, originalItems.length > 0 ? originalItems : null, items);
+                    
+                    const supplier = await db.suppliers.get(sid);
+                    const supplierName = supplier ? supplier.name : sid;
+                    
+                    const enrichedItems = await Promise.all(items.map(async it => {
+                        const prod = await db.products.get(it.pid);
+                        return {
+                            ...it,
+                            product_name: prod ? prod.name : '未知產品'
+                        };
+                    }));
+
+                    const enrichedOriginal = originalItems.length > 0 ? await Promise.all(originalItems.map(async it => {
+                        const prod = await db.products.get(it.product_id);
+                        return {
+                            ...it,
+                            product_name: prod ? prod.name : '未知產品'
+                        };
+                    })) : null;
+
+                    const logOld = enrichedOriginal ? { supplier_id: originalItems[0].supplier_id, supplier_name: (await db.suppliers.get(originalItems[0].supplier_id))?.name || originalItems[0].supplier_id, items: enrichedOriginal } : null;
+                    const logNew = { supplier_id: sid, supplier_name: supplierName, items: enrichedItems };
+
+                    await this.addAuditLog(action, 'purchase', orderId, desc, logOld, logNew);
                 });
             },
 
@@ -257,7 +280,7 @@
                     productsToUpdate[item.product_id] = (productsToUpdate[item.product_id] || 0) + item.qty;
                 }
 
-                await db.transaction('rw', db.products, db.purchases, db.audit_logs, async () => {
+                await db.transaction('rw', db.products, db.purchases, db.suppliers, db.audit_logs, async () => {
                     await db.purchases.where('id').startsWith(orderId).delete();
                     for (const pid in productsToUpdate) {
                         const qtyToDeduct = productsToUpdate[pid];
@@ -267,7 +290,21 @@
                             await db.products.put(prod);
                         }
                     }
-                    await this.addAuditLog('DELETE', 'purchase', orderId, `刪除進貨單 ${orderId}`, existingItems, null);
+
+                    const sid = existingItems[0]?.supplier_id;
+                    const supplier = sid ? await db.suppliers.get(sid) : null;
+                    const supplierName = supplier ? supplier.name : sid;
+
+                    const enrichedItems = await Promise.all(existingItems.map(async it => {
+                        const prod = await db.products.get(it.product_id);
+                        return {
+                            ...it,
+                            product_name: prod ? prod.name : '未知產品'
+                        };
+                    }));
+
+                    const logOld = { supplier_id: sid, supplier_name: supplierName, items: enrichedItems };
+                    await this.addAuditLog('DELETE', 'purchase', orderId, `刪除進貨單 ${orderId}`, logOld, null);
                 });
             },
 
@@ -730,6 +767,33 @@
 
                 assert(restoreCreate.details.value.name === '模擬品', '還原物件欄位內容錯誤');
                 assert(restoreUpdate.details.changed_fields.stock.old === 10, '還原比對明細內容錯誤');
+            });
+
+            await runTestCase('測試案例 12：日誌快照自包含驗證，當商品被刪除後，日誌仍應保留商品與廠商名稱', async (log) => {
+                log('1. 建立測試廠商 S001 與商品 P001');
+                await db.suppliers.put({ id: 'S001', name: '測試廠商A' });
+                await db.products.put({ id: 'P001', name: '測試商品A', cost: 100, price: 150, stock: 10 });
+
+                log('2. 建立進貨單 P6，採購 P001 數量 5，廠商為 S001');
+                await testApp.savePurchaseOrder('P6', '2026-05-30', 'S001', [
+                    { pid: 'P001', qty: 5, cost: 100 }
+                ]);
+
+                log('3. 刪除商品 P001 與廠商 S001，模擬商品與廠商被徹底刪除的場景');
+                await db.products.delete('P001');
+                await db.suppliers.delete('S001');
+
+                log('4. 讀取進貨單 P6 日誌快照，驗證其中是否仍保留了商品名稱與廠商名稱');
+                const logs = await db.audit_logs.where('target_id').equals('P6').toArray();
+                assert(logs.length === 1, '進貨單 P6 日誌未建立');
+                
+                const logDetail = logs[0].details.value;
+                assert(!!logDetail, '日誌 details 快照遺失');
+                log(`快照中廠商名稱：${logDetail.supplier_name} (預期：測試廠商A)`);
+                log(`快照中商品名稱：${logDetail.items[0].product_name} (預期：測試商品A)`);
+
+                assert(logDetail.supplier_name === '測試廠商A', '日誌快照中未正確保留廠商名稱');
+                assert(logDetail.items[0].product_name === '測試商品A', '日誌快照中未正確保留商品名稱');
             });
 
             // 標記測試全部完成
