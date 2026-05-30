@@ -360,6 +360,46 @@
                     await db.products.delete(id);
                     await this.addAuditLog('DELETE', 'product', id, `刪除商品「${oldVal.name}」`, oldVal, null);
                 }
+            },
+
+            async saveSupplier(id, data) {
+                const oldVal = await db.suppliers.get(id);
+                const isEdit = !!oldVal;
+                
+                await db.suppliers.put({ id, ...data });
+                
+                const action = isEdit ? 'UPDATE' : 'CREATE';
+                const desc = isEdit ? `編輯廠商「${data.name}」` : `新增廠商「${data.name}」`;
+                
+                await this.addAuditLog(action, 'supplier', id, desc, oldVal, { id, ...data });
+            },
+
+            async deleteSupplier(id) {
+                const oldVal = await db.suppliers.get(id);
+                if (oldVal) {
+                    await db.suppliers.delete(id);
+                    await this.addAuditLog('DELETE', 'supplier', id, `刪除廠商「${oldVal.name}」`, oldVal, null);
+                }
+            },
+
+            async saveCustomer(id, data) {
+                const oldVal = await db.customers.get(id);
+                const isEdit = !!oldVal;
+                
+                await db.customers.put({ id, ...data });
+                
+                const action = isEdit ? 'UPDATE' : 'CREATE';
+                const desc = isEdit ? `編輯客戶「${data.name}」` : `新增客戶「${data.name}」`;
+                
+                await this.addAuditLog(action, 'customer', id, desc, oldVal, { id, ...data });
+            },
+
+            async deleteCustomer(id) {
+                const oldVal = await db.customers.get(id);
+                if (oldVal) {
+                    await db.customers.delete(id);
+                    await this.addAuditLog('DELETE', 'customer', id, `刪除客戶「${oldVal.name}」`, oldVal, null);
+                }
             }
         };
 
@@ -832,6 +872,224 @@
                     assert(window.fsCheck.convertedDataExists === false, 'js/converted-data.js 檔案依然存在！');
                 } else {
                     log('⚠️ 未偵測到 fsCheck (非無頭瀏覽器環境)，略過本機檔案移除驗證。請在終端機執行 npm test 完成完整本機驗證。');
+                }
+            });
+
+            await runTestCase('測試案例 14：執行進貨廠商新增、修改、刪除時，應正確寫入資料庫並記錄變更日誌', async (log) => {
+                log('1. 新增廠商 S002');
+                await testApp.saveSupplier('S002', {
+                    name: '廠商B',
+                    full_name: '廠商B股份有限公司',
+                    contact: '聯絡人B',
+                    phone: '02-22222222',
+                    email: 'b@supplier.com'
+                });
+
+                const supplier = await db.suppliers.get('S002');
+                assert(!!supplier, '廠商 S002 未成功寫入資料庫');
+                assert(supplier.name === '廠商B', '廠商名稱寫入不正確');
+
+                const logsAfterCreate = await db.audit_logs.where('target_id').equals('S002').toArray();
+                assert(logsAfterCreate.length === 1, '未成功建立新增廠商之變更日誌');
+                assert(logsAfterCreate[0].action === 'CREATE', '日誌動作非 CREATE');
+
+                log('2. 編輯廠商 S002 (修改聯絡人與電話)');
+                await testApp.saveSupplier('S002', {
+                    name: '廠商B',
+                    full_name: '廠商B股份有限公司',
+                    contact: '新聯絡人B',
+                    phone: '02-33333333',
+                    email: 'b@supplier.com'
+                });
+
+                const updatedSupplier = await db.suppliers.get('S002');
+                assert(updatedSupplier.contact === '新聯絡人B', '聯絡人更新失敗');
+                assert(updatedSupplier.phone === '02-33333333', '電話更新失敗');
+
+                const logsAfterUpdate = await db.audit_logs.where('target_id').equals('S002').toArray();
+                assert(logsAfterUpdate.length === 2, '未成功建立修改廠商之變更日誌');
+                
+                const updateLog = logsAfterUpdate.find(l => l.action === 'UPDATE');
+                assert(!!updateLog, '未找到 UPDATE 類型日誌');
+                assert(!!updateLog.details && !!updateLog.details.changed_fields, '日誌未正確記錄欄位變更 Diff');
+                assert(updateLog.details.changed_fields.contact.old === '聯絡人B', 'Diff 聯絡人舊值錯誤');
+                assert(updateLog.details.changed_fields.contact.new === '新聯絡人B', 'Diff 聯絡人新值錯誤');
+
+                log('3. 刪除廠商 S002');
+                await testApp.deleteSupplier('S002');
+
+                const deletedSupplier = await db.suppliers.get('S002');
+                assert(!deletedSupplier, '廠商 S002 刪除失敗');
+
+                const logsAfterDelete = await db.audit_logs.where('target_id').equals('S002').toArray();
+                assert(logsAfterDelete.length === 3, '未成功建立刪除廠商之變更日誌');
+                assert(logsAfterDelete.some(l => l.action === 'DELETE'), '未找到 DELETE 類型日誌');
+            });
+
+            await runTestCase('測試案例 15：執行客戶資料新增、修改、刪除時，應正確寫入資料庫並記錄變更日誌', async (log) => {
+                log('1. 新增客戶 C002');
+                await testApp.saveCustomer('C002', {
+                    name: '客戶B',
+                    phone: '0912-345678',
+                    address: '台北市信義路',
+                    salesperson: '小李',
+                    email: 'b@customer.com'
+                });
+
+                const customer = await db.customers.get('C002');
+                assert(!!customer, '客戶 C002 未成功寫入資料庫');
+                assert(customer.name === '客戶B', '客戶名稱寫入不正確');
+
+                const logsAfterCreate = await db.audit_logs.where('target_id').equals('C002').toArray();
+                assert(logsAfterCreate.length === 1, '未成功建立新增客戶之變更日誌');
+                assert(logsAfterCreate[0].action === 'CREATE', '日誌動作非 CREATE');
+
+                log('2. 編輯客戶 C002 (修改服務員與 Email)');
+                await testApp.saveCustomer('C002', {
+                    name: '客戶B',
+                    phone: '0912-345678',
+                    address: '台北市信義路',
+                    salesperson: '新服務員張三',
+                    email: 'newb@customer.com'
+                });
+
+                const updatedCustomer = await db.customers.get('C002');
+                assert(updatedCustomer.salesperson === '新服務員張三', '服務員更新失敗');
+                assert(updatedCustomer.email === 'newb@customer.com', 'Email 更新失敗');
+
+                const logsAfterUpdate = await db.audit_logs.where('target_id').equals('C002').toArray();
+                assert(logsAfterUpdate.length === 2, '未成功建立修改客戶之變更日誌');
+                
+                const updateLog = logsAfterUpdate.find(l => l.action === 'UPDATE');
+                assert(!!updateLog, '未找到 UPDATE 類型日誌');
+                assert(!!updateLog.details && !!updateLog.details.changed_fields, '日誌未正確記錄欄位變更 Diff');
+                assert(updateLog.details.changed_fields.salesperson.old === '小李', 'Diff 舊值錯誤');
+                assert(updateLog.details.changed_fields.salesperson.new === '新服務員張三', 'Diff 新值錯誤');
+
+                log('3. 刪除客戶 C002');
+                await testApp.deleteCustomer('C002');
+
+                const deletedCustomer = await db.customers.get('C002');
+                assert(!deletedCustomer, '客戶 C002 刪除失敗');
+
+                const logsAfterDelete = await db.audit_logs.where('target_id').equals('C002').toArray();
+                assert(logsAfterDelete.length === 3, '未成功建立刪除客戶之變更日誌');
+                assert(logsAfterDelete.some(l => l.action === 'DELETE'), '未找到 DELETE 類型日誌');
+            });
+
+            await runTestCase('測試案例 16：驗證廠商模糊搜尋篩選邏輯之正確性', async (log) => {
+                const list = [
+                    { id: 'S01', name: '廠商A', full_name: '廠商A股份有限公司', contact: '張三', phone: '02-11112222', email: 'a@test.com' },
+                    { id: 'S02', name: '廠商B', full_name: '廠商B股份有限公司', contact: '李四', phone: '0988-123456', email: 'b@test.com' }
+                ];
+
+                const filterFunc = (query, data) => {
+                    const q = (query || '').toLowerCase().trim();
+                    if (!q) return data;
+                    return data.filter(item => 
+                        (item.id || '').toLowerCase().includes(q) ||
+                        (item.name || '').toLowerCase().includes(q) ||
+                        (item.full_name || '').toLowerCase().includes(q) ||
+                        (item.contact || '').toLowerCase().includes(q) ||
+                        (item.phone || '').toLowerCase().includes(q) ||
+                        (item.email || '').toLowerCase().includes(q)
+                    );
+                };
+
+                log('1. 測試以中文簡稱搜尋');
+                const resName = filterFunc('廠商A', list);
+                assert(resName.length === 1 && resName[0].id === 'S01', '名稱搜尋失敗');
+
+                log('2. 測試以大小寫 ID 搜尋');
+                const resId = filterFunc('s02', list);
+                assert(resId.length === 1 && resId[0].id === 'S02', 'ID 搜尋失敗');
+
+                log('3. 測試以電話搜尋');
+                const resPhone = filterFunc('123456', list);
+                assert(resPhone.length === 1 && resPhone[0].id === 'S02', '電話搜尋失敗');
+
+                log('4. 測試無匹配關鍵字搜尋');
+                const resEmpty = filterFunc('未知條件', list);
+                assert(resEmpty.length === 0, '無匹配關鍵字搜尋結果有誤');
+            });
+
+            await runTestCase('測試案例 17：驗證客戶模糊搜尋篩選邏輯之正確性', async (log) => {
+                const list = [
+                    { id: 'C01', name: '客戶A', english_name: 'Customer A', phone: '0912-345678', address: '台北市信義路', salesperson: '小李', email: 'a@customer.com' },
+                    { id: 'C02', name: '客戶B', english_name: 'Customer B', phone: '0933-888999', address: '新北市板橋區', salesperson: '小張', email: 'b@customer.com' }
+                ];
+
+                const filterFunc = (query, data) => {
+                    const q = (query || '').toLowerCase().trim();
+                    if (!q) return data;
+                    return data.filter(item => 
+                        (item.id || '').toLowerCase().includes(q) ||
+                        (item.name || '').toLowerCase().includes(q) ||
+                        (item.english_name || '').toLowerCase().includes(q) ||
+                        (item.phone || '').toLowerCase().includes(q) ||
+                        (item.address || '').toLowerCase().includes(q) ||
+                        (item.salesperson || '').toLowerCase().includes(q) ||
+                        (item.email || '').toLowerCase().includes(q)
+                    );
+                };
+
+                log('1. 測試以英文姓名搜尋');
+                const resEng = filterFunc('customer a', list);
+                assert(resEng.length === 1 && resEng[0].id === 'C01', '英文姓名搜尋失敗');
+
+                log('2. 測試以服務員搜尋');
+                const resSales = filterFunc('小張', list);
+                assert(resSales.length === 1 && resSales[0].id === 'C02', '服務員搜尋失敗');
+
+                log('3. 測試以地址搜尋');
+                const resAddr = filterFunc('板橋', list);
+            });
+
+            await runTestCase('測試案例 18：驗證廠商展開詳細資料的 DOM 與 colspan 配置', async (log) => {
+                if (window.indexHtmlContent) {
+                    log('1. 解析主 index.html 原始碼');
+                    const parser = new DOMParser();
+                    const doc = parser.parseFromString(window.indexHtmlContent, 'text/html');
+
+                    log('2. 獲取 tpl-suppliers 範本');
+                    const tpl = doc.getElementById('tpl-suppliers');
+                    assert(!!tpl, '找不到 tpl-suppliers 範本');
+                    const tempDiv = document.createElement('div');
+                    tempDiv.innerHTML = tpl.innerHTML;
+
+                    log('3. 驗證廠商表頭第一個 th 為展開空列');
+                    const firstTh = tempDiv.querySelector('thead th');
+                    assert(!!firstTh && firstTh.style.width === '40px', '表頭第一個 th 應為 40px 的展開列');
+
+                    log('4. 驗證廠商表格 thead 總列數為 8');
+                    const ths = tempDiv.querySelectorAll('thead th');
+                    assert(ths.length === 8, `表頭欄位數應為 8，實際為 ${ths.length}`);
+                } else {
+                    log('⚠️ 非無頭瀏覽器環境，略過 index.html DOM 驗證。');
+                }
+            });
+
+            await runTestCase('測試案例 19：驗證客戶展開詳細資料的 DOM 與 colspan 配置', async (log) => {
+                if (window.indexHtmlContent) {
+                    log('1. 解析主 index.html 原始碼');
+                    const parser = new DOMParser();
+                    const doc = parser.parseFromString(window.indexHtmlContent, 'text/html');
+
+                    log('2. 獲取 tpl-customers 範本');
+                    const tpl = doc.getElementById('tpl-customers');
+                    assert(!!tpl, '找不到 tpl-customers 範本');
+                    const tempDiv = document.createElement('div');
+                    tempDiv.innerHTML = tpl.innerHTML;
+
+                    log('3. 驗證客戶表頭第一個 th 為展開空列');
+                    const firstTh = tempDiv.querySelector('thead th');
+                    assert(!!firstTh && firstTh.style.width === '40px', '表頭第一個 th 應為 40px 的展開列');
+
+                    log('4. 驗證客戶表格 thead 總列數為 8');
+                    const ths = tempDiv.querySelectorAll('thead th');
+                    assert(ths.length === 8, `表頭欄位數應為 8，實際為 ${ths.length}`);
+                } else {
+                    log('⚠️ 非無頭瀏覽器環境，略過 index.html DOM 驗證。');
                 }
             });
 

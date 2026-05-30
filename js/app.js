@@ -724,42 +724,129 @@ const app = {
     async renderSuppliers() {
         const data = await DB.getAll('suppliers');
         const tbody = document.getElementById('suppliers-tbody');
-        if (!data.length) {
-            tbody.innerHTML = '<tr><td colspan="6" class="text-center">尚無廠商資料。</td></tr>';
-            return;
+        const searchInput = document.getElementById('supplier-search');
+        if (!tbody) return;
+
+        const renderFiltered = () => {
+            const query = (searchInput ? searchInput.value : '').toLowerCase().trim();
+            const filtered = query ? data.filter(item => 
+                (item.id || '').toLowerCase().includes(query) ||
+                (item.name || '').toLowerCase().includes(query) ||
+                (item.full_name || '').toLowerCase().includes(query) ||
+                (item.contact || '').toLowerCase().includes(query) ||
+                (item.phone || '').toLowerCase().includes(query) ||
+                (item.mobile || '').toLowerCase().includes(query) ||
+                (item.email || '').toLowerCase().includes(query)
+            ) : data;
+
+            if (!filtered.length) {
+                tbody.innerHTML = '<tr><td colspan="8" class="text-center" style="padding: 20px;">尚無符合篩選條件的廠商資料。</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = filtered.map(item => `
+                <tr class="main-order-row" style="cursor: pointer;" onclick="app.toggleOrderDetail('${item.id}')">
+                    <td id="arrow-${item.id}" style="text-align: center; font-size: 0.8rem; transition: transform 0.2s;"><i class="ph ph-caret-right"></i></td>
+                    <td>${item.id || ''}</td>
+                    <td><strong>${item.name || ''}</strong></td>
+                    <td class="text-muted" style="font-size:0.85em">${item.full_name || ''}</td>
+                    <td>${item.contact || ''}</td>
+                    <td>${item.phone || item.mobile || ''}</td>
+                    <td>${item.email || ''}</td>
+                    <td>
+                        <button class="btn btn-sm btn-outline" style="padding: 2px 6px; font-size: 0.8rem; margin-right: 4px;" onclick="event.stopPropagation(); app.showModal('supplier-modal', '${item.id}')">修改</button>
+                        <button class="btn btn-sm btn-outline" style="padding: 2px 6px; font-size: 0.8rem;" onclick="event.stopPropagation(); app.deleteRecord('suppliers', '${item.id}')">刪除</button>
+                    </td>
+                </tr>
+                <tr id="detail-row-${item.id}" class="detail-row" style="display: none; background: rgba(0,0,0,0.01);">
+                    <td colspan="8" style="padding: 12px 20px;">
+                        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; font-size: 0.88rem; text-align: left; color: var(--text-muted);">
+                            <div><strong>廠商全名：</strong>${item.full_name || '(空)'}</div>
+                            <div><strong>統一編號：</strong>${item.tax_id || '(空)'}</div>
+                            <div><strong>聯絡人：</strong>${item.contact || '(空)'}</div>
+                            <div><strong>電話：</strong>${item.phone || '(空)'}</div>
+                            <div><strong>手機：</strong>${item.mobile || '(空)'}</div>
+                            <div><strong>傳真：</strong>${item.fax || '(空)'}</div>
+                            <div style="grid-column: span 3;"><strong>地址：</strong>${item.zip_code ? `[${item.zip_code}] ` : ''}${item.address || '(空)'}</div>
+                            <div style="grid-column: span 3;"><strong>Email：</strong>${item.email || '(空)'}</div>
+                            <div style="grid-column: span 3;"><strong>備註：</strong>${item.remark || '(空)'}</div>
+                        </div>
+                    </td>
+                </tr>
+            `).join('');
+        };
+
+        if (searchInput) {
+            searchInput.oninput = renderFiltered;
         }
-        tbody.innerHTML = data.map(item => `
-            <tr>
-                <td>${item.id || ''}</td>
-                <td><strong>${item.name || ''}</strong></td>
-                <td class="text-muted" style="font-size:0.85em">${item.full_name || ''}</td>
-                <td>${item.contact || ''}</td>
-                <td>${item.phone || item.mobile || ''}</td>
-                <td>${item.email || ''}</td>
-            </tr>
-        `).join('');
+        renderFiltered();
     },
 
     async renderCustomers() {
         const data = await DB.getAll('customers');
         const tbody = document.getElementById('customers-tbody');
-        if (!data.length) {
-            tbody.innerHTML = '<tr><td colspan="6" class="text-center">尚無客戶資料。</td></tr>';
-            return;
+        const searchInput = document.getElementById('customer-search');
+        if (!tbody) return;
+
+        const renderFiltered = () => {
+            const query = (searchInput ? searchInput.value : '').toLowerCase().trim();
+            const filtered = query ? data.filter(item => 
+                (item.id || '').toLowerCase().includes(query) ||
+                (item.name || '').toLowerCase().includes(query) ||
+                (item.english_name || '').toLowerCase().includes(query) ||
+                (item.phone || '').toLowerCase().includes(query) ||
+                (item.address || '').toLowerCase().includes(query) ||
+                (item.salesperson || '').toLowerCase().includes(query) ||
+                (item.email || '').toLowerCase().includes(query)
+            ) : data;
+
+            if (!filtered.length) {
+                tbody.innerHTML = '<tr><td colspan="8" class="text-center" style="padding: 20px;">尚無符合篩選條件的客戶資料。</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = filtered.map(item => `
+                <tr class="main-order-row" style="cursor: pointer;" onclick="app.toggleOrderDetail('${item.id}')">
+                    <td id="arrow-${item.id}" style="text-align: center; font-size: 0.8rem; transition: transform 0.2s;"><i class="ph ph-caret-right"></i></td>
+                    <td>${item.id || ''}</td>
+                    <td>
+                        <strong>${item.name || ''}</strong>
+                        ${item.english_name ? `<span class="text-muted" style="font-size:0.82em;display:block">${item.english_name}</span>` : ''}
+                    </td>
+                    <td>${item.phone || ''}</td>
+                    <td>${item.address || ''}</td>
+                    <td>${item.salesperson || ''}</td>
+                    <td>${item.email || ''}</td>
+                    <td>
+                        <button class="btn btn-sm btn-outline" style="padding: 2px 6px; font-size: 0.8rem; margin-right: 4px;" onclick="event.stopPropagation(); app.showModal('customer-modal', '${item.id}')">修改</button>
+                        <button class="btn btn-sm btn-outline" style="padding: 2px 6px; font-size: 0.8rem;" onclick="event.stopPropagation(); app.deleteRecord('customers', '${item.id}')">刪除</button>
+                    </td>
+                </tr>
+                <tr id="detail-row-${item.id}" class="detail-row" style="display: none; background: rgba(0,0,0,0.01);">
+                    <td colspan="8" style="padding: 12px 20px;">
+                        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; font-size: 0.88rem; text-align: left; color: var(--text-muted);">
+                            <div><strong>英文名稱：</strong>${item.english_name || '(空)'}</div>
+                            <div><strong>客戶類別：</strong>${item.customer_type || '(一般客戶)'}</div>
+                            <div><strong>性別：</strong>${item.gender || '(空)'}</div>
+                            <div><strong>生日：</strong>${item.birthday || '(空)'}</div>
+                            <div><strong>統一編號：</strong>${item.tax_id || '(空)'}</div>
+                            <div><strong>發票抬頭：</strong>${item.invoice_title || '(空)'}</div>
+                            <div><strong>貴賓卡號：</strong>${item.vip_card || '(空)'}</div>
+                            <div><strong>會員卡號：</strong>${item.member_card || '(空)'}</div>
+                            <div><strong>儲值卡號：</strong>${item.store_value_id || '(空)'}</div>
+                            <div><strong>傳真：</strong>${item.fax || '(空)'}</div>
+                            <div style="grid-column: span 2;"><strong>郵遞區號 & 地址：</strong>${item.zip_code ? `[${item.zip_code}] ` : ''}${item.address || '(空)'}</div>
+                            <div style="grid-column: span 3;"><strong>備註：</strong>${item.remarks || '(空)'}</div>
+                        </div>
+                    </td>
+                </tr>
+            `).join('');
+        };
+
+        if (searchInput) {
+            searchInput.oninput = renderFiltered;
         }
-        tbody.innerHTML = data.map(item => `
-            <tr>
-                <td>${item.id || ''}</td>
-                <td>
-                    <strong>${item.name || ''}</strong>
-                    ${item.english_name ? `<span class="text-muted" style="font-size:0.82em;display:block">${item.english_name}</span>` : ''}
-                </td>
-                <td>${item.phone || ''}</td>
-                <td>${item.address || ''}</td>
-                <td>${item.salesperson || ''}</td>
-                <td>${item.email || ''}</td>
-            </tr>
-        `).join('');
+        renderFiltered();
     },
 
     async renderReports() {
@@ -1354,7 +1441,7 @@ const app = {
 
         const modalEl = overlay.querySelector('.modal');
         if (modalEl) {
-            if (type === 'purchase-modal' || type === 'sale-modal') {
+            if (type === 'purchase-modal' || type === 'sale-modal' || type === 'supplier-modal' || type === 'customer-modal') {
                 modalEl.classList.add('modal-lg');
             } else {
                 modalEl.classList.remove('modal-lg');
@@ -1401,6 +1488,120 @@ const app = {
                 const desc = isEdit ? `編輯商品「${name}」 (代碼: ${id})` : `新增商品「${name}」 (代碼: ${id})`;
                 await this.addAuditLog(action, 'product', id, desc, oldVal, productData);
 
+                return true;
+            };
+        } else if (type === 'supplier-modal') {
+            const isEdit = !!extraData;
+            mTitle.innerText = isEdit ? '編輯廠商' : '新增廠商';
+            
+            const oldVal = isEdit ? await db.suppliers.get(extraData) : null;
+            const defaultId = isEdit ? extraData : this.generateID('S');
+            
+            html = `
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; max-height: 400px; overflow-y: auto; padding-right: 6px;">
+                    <div class="form-group"><label>廠商編號</label><input type="text" id="m-id" class="form-control" value="${defaultId}" ${isEdit ? 'readonly' : ''}></div>
+                    <div class="form-group"><label>廠商名稱（簡稱）</label><input type="text" id="m-name" class="form-control" value="${isEdit ? (oldVal.name || '') : ''}"></div>
+                    <div class="form-group"><label>廠商全名</label><input type="text" id="m-full-name" class="form-control" value="${isEdit ? (oldVal.full_name || '') : ''}"></div>
+                    <div class="form-group"><label>聯絡人</label><input type="text" id="m-contact" class="form-control" value="${isEdit ? (oldVal.contact || '') : ''}"></div>
+                    <div class="form-group"><label>電話</label><input type="text" id="m-phone" class="form-control" value="${isEdit ? (oldVal.phone || '') : ''}"></div>
+                    <div class="form-group"><label>手機</label><input type="text" id="m-mobile" class="form-control" value="${isEdit ? (oldVal.mobile || '') : ''}"></div>
+                    <div class="form-group"><label>傳真</label><input type="text" id="m-fax" class="form-control" value="${isEdit ? (oldVal.fax || '') : ''}"></div>
+                    <div class="form-group"><label>統一編號</label><input type="text" id="m-tax-id" class="form-control" value="${isEdit ? (oldVal.tax_id || '') : ''}"></div>
+                    <div class="form-group"><label>郵遞區號</label><input type="text" id="m-zip-code" class="form-control" value="${isEdit ? (oldVal.zip_code || '') : ''}"></div>
+                    <div class="form-group"><label>地址</label><input type="text" id="m-address" class="form-control" value="${isEdit ? (oldVal.address || '') : ''}"></div>
+                    <div class="form-group" style="grid-column: span 2;"><label>Email</label><input type="text" id="m-email" class="form-control" value="${isEdit ? (oldVal.email || '') : ''}"></div>
+                    <div class="form-group" style="grid-column: span 2;"><label>備註</label><textarea id="m-remark" class="form-control" rows="2">${isEdit ? (oldVal.remark || '') : ''}</textarea></div>
+                </div>
+            `;
+            
+            saveHandler = async () => {
+                const id = document.getElementById('m-id').value.trim();
+                const name = document.getElementById('m-name').value.trim();
+                const full_name = document.getElementById('m-full-name').value.trim();
+                const contact = document.getElementById('m-contact').value.trim();
+                const phone = document.getElementById('m-phone').value.trim();
+                const mobile = document.getElementById('m-mobile').value.trim();
+                const fax = document.getElementById('m-fax').value.trim();
+                const tax_id = document.getElementById('m-tax-id').value.trim();
+                const zip_code = document.getElementById('m-zip-code').value.trim();
+                const address = document.getElementById('m-address').value.trim();
+                const email = document.getElementById('m-email').value.trim();
+                const remark = document.getElementById('m-remark').value.trim();
+
+                if (!id) { await this.alert('請輸入廠商編號'); return false; }
+                if (!name) { await this.alert('請輸入廠商名稱'); return false; }
+
+                const supplierData = { id, name, full_name, contact, phone, mobile, fax, tax_id, zip_code, address, email, remark };
+                await DB.save('suppliers', supplierData);
+
+                const action = isEdit ? 'UPDATE' : 'CREATE';
+                const desc = isEdit ? `編輯廠商「${name}」 (編號: ${id})` : `新增廠商「${name}」 (編號: ${id})`;
+                await this.addAuditLog(action, 'supplier', id, desc, oldVal, supplierData);
+
+                this.showToast(isEdit ? '廠商更新成功' : '廠商新增成功');
+                return true;
+            };
+        } else if (type === 'customer-modal') {
+            const isEdit = !!extraData;
+            mTitle.innerText = isEdit ? '編輯客戶' : '新增客戶';
+            
+            const oldVal = isEdit ? await db.customers.get(extraData) : null;
+            const defaultId = isEdit ? extraData : this.generateID('C');
+            
+            html = `
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; max-height: 400px; overflow-y: auto; padding-right: 6px;">
+                    <div class="form-group"><label>客戶編號</label><input type="text" id="m-id" class="form-control" value="${defaultId}" ${isEdit ? 'readonly' : ''}></div>
+                    <div class="form-group"><label>客戶名稱</label><input type="text" id="m-name" class="form-control" value="${isEdit ? (oldVal.name || '') : ''}"></div>
+                    <div class="form-group"><label>英文名稱</label><input type="text" id="m-english-name" class="form-control" value="${isEdit ? (oldVal.english_name || '') : ''}"></div>
+                    <div class="form-group"><label>電話</label><input type="text" id="m-phone" class="form-control" value="${isEdit ? (oldVal.phone || '') : ''}"></div>
+                    <div class="form-group"><label>服務員</label><input type="text" id="m-salesperson" class="form-control" value="${isEdit ? (oldVal.salesperson || '') : ''}"></div>
+                    <div class="form-group"><label>統一編號</label><input type="text" id="m-tax-id" class="form-control" value="${isEdit ? (oldVal.tax_id || '') : ''}"></div>
+                    <div class="form-group"><label>發票抬頭</label><input type="text" id="m-invoice-title" class="form-control" value="${isEdit ? (oldVal.invoice_title || '') : ''}"></div>
+                    <div class="form-group"><label>郵遞區號</label><input type="text" id="m-zip-code" class="form-control" value="${isEdit ? (oldVal.zip_code || '') : ''}"></div>
+                    <div class="form-group"><label>客戶類別</label><input type="text" id="m-customer-type" class="form-control" value="${isEdit ? (oldVal.customer_type || '') : ''}" placeholder="例：VIP、一般客戶"></div>
+                    <div class="form-group"><label>性別</label><input type="text" id="m-gender" class="form-control" value="${isEdit ? (oldVal.gender || '') : ''}" placeholder="例：男、女"></div>
+                    <div class="form-group"><label>生日</label><input type="date" id="m-birthday" class="form-control" value="${isEdit ? (oldVal.birthday || '') : ''}"></div>
+                    <div class="form-group"><label>傳真</label><input type="text" id="m-fax" class="form-control" value="${isEdit ? (oldVal.fax || '') : ''}"></div>
+                    <div class="form-group"><label>貴賓卡號</label><input type="text" id="m-vip-card" class="form-control" value="${isEdit ? (oldVal.vip_card || '') : ''}"></div>
+                    <div class="form-group"><label>會員卡號</label><input type="text" id="m-member-card" class="form-control" value="${isEdit ? (oldVal.member_card || '') : ''}"></div>
+                    <div class="form-group"><label>儲值卡號</label><input type="text" id="m-store-value-id" class="form-control" value="${isEdit ? (oldVal.store_value_id || '') : ''}"></div>
+                    <div class="form-group"><label>Email</label><input type="text" id="m-email" class="form-control" value="${isEdit ? (oldVal.email || '') : ''}"></div>
+                    <div class="form-group" style="grid-column: span 2;"><label>地址</label><input type="text" id="m-address" class="form-control" value="${isEdit ? (oldVal.address || '') : ''}"></div>
+                    <div class="form-group" style="grid-column: span 2;"><label>備註</label><textarea id="m-remarks" class="form-control" rows="2">${isEdit ? (oldVal.remarks || '') : ''}</textarea></div>
+                </div>
+            `;
+            
+            saveHandler = async () => {
+                const id = document.getElementById('m-id').value.trim();
+                const name = document.getElementById('m-name').value.trim();
+                const english_name = document.getElementById('m-english-name').value.trim();
+                const phone = document.getElementById('m-phone').value.trim();
+                const address = document.getElementById('m-address').value.trim();
+                const salesperson = document.getElementById('m-salesperson').value.trim();
+                const email = document.getElementById('m-email').value.trim();
+                const tax_id = document.getElementById('m-tax-id').value.trim();
+                const invoice_title = document.getElementById('m-invoice-title').value.trim();
+                const vip_card = document.getElementById('m-vip-card').value.trim();
+                const member_card = document.getElementById('m-member-card').value.trim();
+                const store_value_id = document.getElementById('m-store-value-id').value.trim();
+                const customer_type = document.getElementById('m-customer-type').value.trim();
+                const gender = document.getElementById('m-gender').value.trim();
+                const birthday = document.getElementById('m-birthday').value;
+                const fax = document.getElementById('m-fax').value.trim();
+                const zip_code = document.getElementById('m-zip-code').value.trim();
+                const remarks = document.getElementById('m-remarks').value.trim();
+
+                if (!id) { await this.alert('請輸入客戶編號'); return false; }
+                if (!name) { await this.alert('請輸入客戶名稱'); return false; }
+
+                const customerData = { id, name, english_name, phone, address, salesperson, email, tax_id, invoice_title, vip_card, member_card, store_value_id, customer_type, gender, birthday, fax, zip_code, remarks };
+                await DB.save('customers', customerData);
+
+                const action = isEdit ? 'UPDATE' : 'CREATE';
+                const desc = isEdit ? `編輯客戶「${name}」 (編號: ${id})` : `新增客戶「${name}」 (編號: ${id})`;
+                await this.addAuditLog(action, 'customer', id, desc, oldVal, customerData);
+
+                this.showToast(isEdit ? '客戶更新成功' : '客戶新增成功');
                 return true;
             };
         } else if (type === 'purchase-modal') {

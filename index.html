@@ -239,17 +239,23 @@
         <div class="glass-panel table-panel">
             <div class="panel-header">
                 <h3>進貨廠商清單</h3>
+                <div class="panel-actions" style="display: flex; gap: 8px; align-items: center;">
+                    <input type="text" id="supplier-search" class="form-control" placeholder="搜尋編號、名稱、聯絡人..." style="width: 200px; margin-bottom: 0; font-size: 0.85rem; height: 36px; padding: 6px 12px;">
+                    <button class="btn btn-sm btn-primary" onclick="app.showModal('supplier-modal')">新增廠商</button>
+                </div>
             </div>
             <div class="table-responsive">
                 <table class="data-table">
                     <thead>
                         <tr>
+                            <th style="width: 40px;"></th>
                             <th>廠商編號</th>
                             <th>廠商名稱（簡稱）</th>
                             <th>廠商全名</th>
                             <th>聯絡人</th>
                             <th>電話／手機</th>
                             <th>Email</th>
+                            <th>操作</th>
                         </tr>
                     </thead>
                     <tbody id="suppliers-tbody">
@@ -263,17 +269,23 @@
         <div class="glass-panel table-panel">
             <div class="panel-header">
                 <h3>客戶資料清單</h3>
+                <div class="panel-actions" style="display: flex; gap: 8px; align-items: center;">
+                    <input type="text" id="customer-search" class="form-control" placeholder="搜尋編號、姓名、電話..." style="width: 200px; margin-bottom: 0; font-size: 0.85rem; height: 36px; padding: 6px 12px;">
+                    <button class="btn btn-sm btn-primary" onclick="app.showModal('customer-modal')">新增客戶</button>
+                </div>
             </div>
             <div class="table-responsive">
                 <table class="data-table">
                     <thead>
                         <tr>
+                            <th style="width: 40px;"></th>
                             <th>客戶編號</th>
                             <th>客戶名稱</th>
                             <th>電話</th>
                             <th>地址</th>
                             <th>服務員</th>
                             <th>電子郵件</th>
+                            <th>操作</th>
                         </tr>
                     </thead>
                     <tbody id="customers-tbody">
