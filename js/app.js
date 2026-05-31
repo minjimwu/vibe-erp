@@ -1464,20 +1464,67 @@ const app = {
             const oldVal = isEdit ? await db.products.get(extraData) : null;
             const defaultId = isEdit ? extraData : '';
             
+            const allProducts = await db.products.toArray();
+            const categories = [...new Set(allProducts.map(p => p.category).filter(Boolean))].sort();
+            
             html = `
                 <div class="form-group"><label>產品代碼</label><input type="text" id="m-id" class="form-control" value="${defaultId}" ${isEdit ? 'readonly' : ''}></div>
                 <div class="form-group"><label>產品名稱</label><input type="text" id="m-name" class="form-control" value="${oldVal ? (oldVal.name || '') : ''}"></div>
-                <div class="form-group"><label>產品類別</label><input type="text" id="m-category" class="form-control" value="${oldVal ? (oldVal.category || '') : ''}"></div>
+                <div class="form-group">
+                    <label>產品類別</label>
+                    <div style="display: flex; gap: 8px; align-items: center;">
+                        <select id="m-category-select" class="form-control" style="flex: 1;">
+                            <option value="">請選擇類別...</option>
+                            ${categories.map(cat => `<option value="${cat}" ${oldVal && oldVal.category === cat ? 'selected' : ''}>${cat}</option>`).join('')}
+                        </select>
+                        <input type="text" id="m-category-input" class="form-control" style="flex: 1; display: none;" placeholder="請輸入新類別" value="${oldVal ? (oldVal.category || '') : ''}">
+                        <button type="button" id="btn-toggle-category" class="btn btn-sm btn-outline" style="white-space: nowrap; padding: 4px 8px; font-size: 0.8rem; height: 36px;">+ 新增</button>
+                    </div>
+                </div>
                 <div class="form-group"><label>進貨成本</label><input type="number" id="m-cost" class="form-control" value="${oldVal ? (oldVal.cost || 0) : ''}"></div>
                 <div class="form-group"><label>預計售價</label><input type="number" id="m-price" class="form-control" value="${oldVal ? (oldVal.price || 0) : ''}"></div>
                 <div class="form-group"><label>庫存量</label><input type="number" id="m-stock" class="form-control" value="${oldVal ? (oldVal.stock || 0) : ''}"></div>
                 <div class="form-group"><label>單位</label><input type="text" id="m-unit" class="form-control" placeholder="例：件、雙、個" value="${oldVal ? (oldVal.unit || '') : ''}"></div>
                 <div class="form-group"><label>供應商ID</label><input type="text" id="m-supplier-id" class="form-control" value="${oldVal ? (oldVal.supplier_id || '') : ''}"></div>
             `;
+            
+            postRender = () => {
+                const sel = document.getElementById('m-category-select');
+                const inp = document.getElementById('m-category-input');
+                const btn = document.getElementById('btn-toggle-category');
+                
+                let customMode = false;
+                
+                if (categories.length === 0) {
+                    sel.style.display = 'none';
+                    inp.style.display = 'block';
+                    btn.style.display = 'none';
+                } else {
+                    btn.onclick = () => {
+                        customMode = !customMode;
+                        if (customMode) {
+                            sel.style.display = 'none';
+                            inp.style.display = 'block';
+                            btn.innerText = '選擇已有';
+                            inp.focus();
+                        } else {
+                            sel.style.display = 'block';
+                            inp.style.display = 'none';
+                            btn.innerText = '+ 新增';
+                        }
+                    };
+                }
+            };
+            
             saveHandler = async () => {
                 const id = document.getElementById('m-id').value;
                 const name = document.getElementById('m-name').value;
-                const category = document.getElementById('m-category').value;
+                
+                const inp = document.getElementById('m-category-input');
+                const sel = document.getElementById('m-category-select');
+                const isCustom = inp.style.display !== 'none';
+                const category = isCustom ? inp.value.trim() : sel.value;
+                
                 const cost = Number(document.getElementById('m-cost').value || 0);
                 const price = Number(document.getElementById('m-price').value || 0);
                 const stock = Number(document.getElementById('m-stock').value || 0);

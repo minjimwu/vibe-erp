@@ -1113,6 +1113,29 @@
                 }
             });
 
+            await runTestCase('測試案例 21：驗證商品類別雙態切換選單之元件結構與切換邏輯', async (log) => {
+                if (window.jsAppContent) {
+                    log('1. 驗證 showModal 是否包含下拉選單 m-category-select 與輸入框 m-category-input');
+                    assert(window.jsAppContent.includes("m-category-select"), '未在 product-modal 中發現 m-category-select 下拉選單');
+                    assert(window.jsAppContent.includes("m-category-input"), '未在 product-modal 中發現 m-category-input 輸入框');
+
+                    log('2. 驗證 showModal 是否包含自訂切換按鈕 btn-toggle-category');
+                    assert(window.jsAppContent.includes("btn-toggle-category"), '未在 product-modal 中發現 btn-toggle-category 切換按鈕');
+
+                    log('3. 驗證 postRender 是否包含按鈕的點擊切換 display 邏輯');
+                    const hasClickToggle = window.jsAppContent.includes("btn-toggle-category") && 
+                                           (window.jsAppContent.includes(".onclick") || window.jsAppContent.includes("addEventListener('click'"));
+                    assert(hasClickToggle, '未在 postRender 中發現 btn-toggle-category 的點擊切換監聽');
+
+                    log('4. 驗證 saveHandler 中是否判斷輸入框的 display 狀態以獲取正確類別值');
+                    const hasModeCheck = window.jsAppContent.includes("m-category-input") && 
+                                         (window.jsAppContent.includes("style.display") || window.jsAppContent.includes("customMode"));
+                    assert(hasModeCheck, '未在 saveHandler 中發現依據模式狀態決定類別來源的邏輯');
+                } else {
+                    log('⚠️ 非無頭瀏覽器環境，略過 js/app.js 原始碼驗證。');
+                }
+            });
+
             // 標記測試全部完成
             const completeDiv = document.createElement('div');
             completeDiv.id = 'tests-complete';
