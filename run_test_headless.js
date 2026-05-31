@@ -19,15 +19,17 @@ const path = require('path');
         const convertScriptExists = fs.existsSync(path.resolve(__dirname, 'convert_old_data.js'));
         const convertedDataExists = fs.existsSync(path.resolve(__dirname, 'js/converted-data.js'));
         const indexHtmlContent = fs.readFileSync(path.resolve(__dirname, 'index.html'), 'utf8');
+        const jsAppContent = fs.readFileSync(path.resolve(__dirname, 'js/app.js'), 'utf8');
         
-        await page.evaluateOnNewDocument((mydata, convert, converted, html) => {
+        await page.evaluateOnNewDocument((mydata, convert, converted, html, jsApp) => {
             window.fsCheck = {
                 mydataExists: mydata,
                 convertScriptExists: convert,
                 convertedDataExists: converted
             };
             window.indexHtmlContent = html;
-        }, mydataExists, convertScriptExists, convertedDataExists, indexHtmlContent);
+            window.jsAppContent = jsApp;
+        }, mydataExists, convertScriptExists, convertedDataExists, indexHtmlContent, jsAppContent);
 
         await page.goto(testHtmlPath);
         

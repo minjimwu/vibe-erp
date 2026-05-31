@@ -224,7 +224,10 @@ const app = {
                 <td><span style="color: ${Number(item.stock) < 10 ? 'var(--danger)' : 'inherit'}">${item.stock || 0}</span></td>
                 <td>${item.unit || ''}</td>
                 <td>${item.supplier_id || ''}</td>
-                <td><button class="btn btn-sm btn-outline" onclick="app.deleteRecord('products', '${item.id}')">刪除</button></td>
+                <td>
+                    <button class="btn btn-sm btn-outline" style="margin-right: 4px;" onclick="app.showModal('product-modal', '${item.id}')">修改</button>
+                    <button class="btn btn-sm btn-outline btn-danger" style="color: var(--danger); border-color: rgba(220,38,38,0.2);" onclick="app.deleteRecord('products', '${item.id}')">刪除</button>
+                </td>
             </tr>
         `).join('');
     },
@@ -1455,16 +1458,21 @@ const app = {
         let postRender = null;
 
         if (type === 'product-modal') {
-            mTitle.innerText = '新增商品';
+            const isEdit = !!extraData;
+            mTitle.innerText = isEdit ? '編輯商品' : '新增商品';
+            
+            const oldVal = isEdit ? await db.products.get(extraData) : null;
+            const defaultId = isEdit ? extraData : '';
+            
             html = `
-                <div class="form-group"><label>產品代碼</label><input type="text" id="m-id" class="form-control"></div>
-                <div class="form-group"><label>產品名稱</label><input type="text" id="m-name" class="form-control"></div>
-                <div class="form-group"><label>產品類別</label><input type="text" id="m-category" class="form-control"></div>
-                <div class="form-group"><label>進貨成本</label><input type="number" id="m-cost" class="form-control"></div>
-                <div class="form-group"><label>預計售價</label><input type="number" id="m-price" class="form-control"></div>
-                <div class="form-group"><label>庫存量</label><input type="number" id="m-stock" class="form-control"></div>
-                <div class="form-group"><label>單位</label><input type="text" id="m-unit" class="form-control" placeholder="例：件、雙、個"></div>
-                <div class="form-group"><label>供應商ID</label><input type="text" id="m-supplier-id" class="form-control"></div>
+                <div class="form-group"><label>產品代碼</label><input type="text" id="m-id" class="form-control" value="${defaultId}" ${isEdit ? 'readonly' : ''}></div>
+                <div class="form-group"><label>產品名稱</label><input type="text" id="m-name" class="form-control" value="${oldVal ? (oldVal.name || '') : ''}"></div>
+                <div class="form-group"><label>產品類別</label><input type="text" id="m-category" class="form-control" value="${oldVal ? (oldVal.category || '') : ''}"></div>
+                <div class="form-group"><label>進貨成本</label><input type="number" id="m-cost" class="form-control" value="${oldVal ? (oldVal.cost || 0) : ''}"></div>
+                <div class="form-group"><label>預計售價</label><input type="number" id="m-price" class="form-control" value="${oldVal ? (oldVal.price || 0) : ''}"></div>
+                <div class="form-group"><label>庫存量</label><input type="number" id="m-stock" class="form-control" value="${oldVal ? (oldVal.stock || 0) : ''}"></div>
+                <div class="form-group"><label>單位</label><input type="text" id="m-unit" class="form-control" placeholder="例：件、雙、個" value="${oldVal ? (oldVal.unit || '') : ''}"></div>
+                <div class="form-group"><label>供應商ID</label><input type="text" id="m-supplier-id" class="form-control" value="${oldVal ? (oldVal.supplier_id || '') : ''}"></div>
             `;
             saveHandler = async () => {
                 const id = document.getElementById('m-id').value;
@@ -1478,15 +1486,15 @@ const app = {
 
                 if (!id) { await this.alert('請輸入產品代碼'); return false; }
 
-                const oldVal = await db.products.get(id);
-                const isEdit = !!oldVal;
+                const currentOldVal = await db.products.get(id);
+                const currentIsEdit = !!currentOldVal;
 
                 const productData = { id, name, category, cost, price, stock, unit, supplier_id };
                 await DB.save('products', productData);
 
-                const action = isEdit ? 'UPDATE' : 'CREATE';
-                const desc = isEdit ? `編輯商品「${name}」 (代碼: ${id})` : `新增商品「${name}」 (代碼: ${id})`;
-                await this.addAuditLog(action, 'product', id, desc, oldVal, productData);
+                const action = currentIsEdit ? 'UPDATE' : 'CREATE';
+                const desc = currentIsEdit ? `編輯商品「${name}」 (代碼: ${id})` : `新增商品「${name}」 (代碼: ${id})`;
+                await this.addAuditLog(action, 'product', id, desc, currentOldVal, productData);
 
                 return true;
             };

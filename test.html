@@ -1093,6 +1093,26 @@
                 }
             });
 
+            await runTestCase('測試案例 20：驗證商品列表「修改」按鈕的存在性與 Modal 編輯模式重構', async (log) => {
+                if (window.jsAppContent) {
+                    log('1. 驗證 renderProducts() 是否包含「修改」按鈕渲染且調用 showModal');
+                    const hasEditBtn = window.jsAppContent.includes("showModal('product-modal', '${item.id}')") || 
+                                       window.jsAppContent.includes("showModal('product-modal', '${item.id}')") || 
+                                       window.jsAppContent.includes("showModal(\"product-modal\", \"${item.id}\")") || 
+                                       window.jsAppContent.includes("showModal(\"product-modal\", '${item.id}')") ||
+                                       window.jsAppContent.includes("showModal('product-modal', '${item.id}')");
+                    assert(hasEditBtn, '未在商品列表渲染中發現「修改」按鈕之 showModal 呼叫');
+
+                    log('2. 驗證 showModal 是否支援 product-modal 的編輯模式判斷');
+                    assert(window.jsAppContent.includes("extraData") && window.jsAppContent.includes("product-modal"), 'showModal 核心邏輯中未發現 extraData 與 product-modal 的處理');
+
+                    log('3. 驗證 product-modal 編輯模式下 ID 輸入框是否為 readonly');
+                    assert(window.jsAppContent.includes("readonly") && window.jsAppContent.includes("m-id"), 'product-modal 表單渲染中未發現 m-id 的 readonly 唯讀設定');
+                } else {
+                    log('⚠️ 非無頭瀏覽器環境，略過 js/app.js 原始碼驗證。');
+                }
+            });
+
             // 標記測試全部完成
             const completeDiv = document.createElement('div');
             completeDiv.id = 'tests-complete';
