@@ -190,21 +190,33 @@ const app = {
     },
 
     async renderProducts() {
-        const [data, purchases, suppliers] = await Promise.all([
+        const [data, purchases, sales, suppliers, customers] = await Promise.all([
             DB.getAll('products'),
             DB.getAll('purchases'),
-            DB.getAll('suppliers')
+            DB.getAll('sales'),
+            DB.getAll('suppliers'),
+            DB.getAll('customers')
         ]);
         const tbody = document.getElementById('products-tbody');
         const filterSel = document.getElementById('product-category-filter');
 
         const supplierMap = new Map(suppliers.map(s => [s.id, s.name]));
+        const customerMap = new Map(customers.map(c => [c.id, c.name]));
+
         const productPurchasesMap = new Map();
         purchases.forEach(p => {
             if (!productPurchasesMap.has(p.product_id)) {
                 productPurchasesMap.set(p.product_id, []);
             }
             productPurchasesMap.get(p.product_id).push(p);
+        });
+
+        const productSalesMap = new Map();
+        sales.forEach(s => {
+            if (!productSalesMap.has(s.product_id)) {
+                productSalesMap.set(s.product_id, []);
+            }
+            productSalesMap.get(s.product_id).push(s);
         });
 
         // Populate category filter options dynamically
@@ -222,8 +234,8 @@ const app = {
 
         if (!filteredData.length) {
             tbody.innerHTML = filterVal 
-                ? `<tr><td colspan="9" class="text-center">尚無符合類別「${filterVal}」的商品。</td></tr>`
-                : '<tr><td colspan="9" class="text-center">尚無資料，請先新增或匯入 Excel 檔案。</td></tr>';
+                ? `<tr><td colspan="10" class="text-center">尚無符合類別「${filterVal}」的商品。</td></tr>`
+                : '<tr><td colspan="10" class="text-center">尚無資料，請先新增或匯入 Excel 檔案。</td></tr>';
             return;
         }
 
@@ -232,9 +244,17 @@ const app = {
             // Sort by Date DESC
             itemPurchases.sort((a, b) => new Date(b.date) - new Date(a.date));
 
+            const itemSales = productSalesMap.get(item.id) || [];
+            // Sort by Date DESC
+            itemSales.sort((a, b) => new Date(b.date) - new Date(a.date));
+
             // Calculate unique purchase order count
             const orderIds = new Set(itemPurchases.map(p => (p.id || '').split('-')[0]));
             const purchaseOrderCount = orderIds.size;
+
+            // Calculate unique sales order count
+            const salesOrderIds = new Set(itemSales.map(s => (s.id || '').split('-')[0]));
+            const salesOrderCount = salesOrderIds.size;
 
             // Calculate weighted average unit cost
             let totalCostSum = 0;
@@ -262,6 +282,23 @@ const app = {
                   }).join('')
                 : `<tr><td colspan="6" class="text-center" style="color: var(--text-muted);">尚無此商品的進貨記錄。</td></tr>`;
 
+            const salesDetailRowsHtml = itemSales.length > 0 
+                ? itemSales.map(s => {
+                    const orderId = (s.id || '').split('-')[0];
+                    const customerName = customerMap.get(s.customer_id) || '未知客戶';
+                    return `
+                        <tr>
+                            <td>${orderId}</td>
+                            <td>${s.date || ''}</td>
+                            <td>${s.customer_id ? `${s.customer_id} (${customerName})` : '未知客戶'}</td>
+                            <td>$${Number(s.price || 0).toLocaleString()}</td>
+                            <td>${s.qty || 0}</td>
+                            <td><strong>$${Number(s.total || 0).toLocaleString()}</strong></td>
+                        </tr>
+                    `;
+                  }).join('')
+                : `<tr><td colspan="6" class="text-center" style="color: var(--text-muted);">尚無此商品的出貨記錄。</td></tr>`;
+
             return `
                 <tr class="main-order-row" style="cursor: pointer;" onclick="app.toggleOrderDetail('${item.id}')">
                     <td class="text-center" id="arrow-${item.id}">
@@ -274,6 +311,7 @@ const app = {
                     <td>$${Number(item.price || 0).toLocaleString()}</td>
                     <td><span style="color: ${Number(item.stock) < 10 ? 'var(--danger)' : 'inherit'}">${item.stock || 0}</span></td>
                     <td>${purchaseOrderCount}</td>
+                    <td>${salesOrderCount}</td>
                     <td onclick="event.stopPropagation();">
                         <button class="btn btn-sm btn-outline" style="margin-right: 4px;" onclick="app.showModal('product-modal', '${item.id}')">修改</button>
                         <button class="btn btn-sm btn-outline btn-danger" style="color: var(--danger); border-color: rgba(220,38,38,0.2);" onclick="app.deleteRecord('products', '${item.id}')">刪除</button>
@@ -281,26 +319,51 @@ const app = {
                 </tr>
                 <tr class="detail-row" id="detail-row-${item.id}" style="display: none; background: rgba(0,0,0,0.01);">
                     <td></td>
-                    <td colspan="8">
-                        <div style="padding: 12px 18px; border-left: 3px solid var(--primary); background: rgba(0,0,0,0.005); border-radius: 0 8px 8px 0; margin: 4px 0 10px 0;">
-                            <h5 style="margin: 0 0 10px 0; font-size: 0.85rem; color: var(--text-muted);">
-                                <i class="ph ph-clock-counter-clockwise"></i> 商品進貨歷史記錄
-                            </h5>
-                            <table class="data-table" style="margin: 0; width: 100%; box-shadow: none; font-size: 0.85rem;">
-                                <thead>
-                                    <tr>
-                                        <th>進貨單號</th>
-                                        <th>進貨日期</th>
-                                        <th>廠商</th>
-                                        <th>進貨成本</th>
-                                        <th>數量</th>
-                                        <th>小計</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    ${detailRowsHtml}
-                                </tbody>
-                            </table>
+                    <td colspan="9">
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 4px 0 10px 0;">
+                            <!-- 左欄：進貨歷史記錄 -->
+                            <div style="padding: 12px 18px; border-left: 3px solid var(--primary); background: rgba(0,0,0,0.005); border-radius: 0 8px 8px 0;">
+                                <h5 style="margin: 0 0 10px 0; font-size: 0.85rem; color: var(--text-muted);">
+                                    <i class="ph ph-clock-counter-clockwise"></i> 商品進貨歷史記錄
+                                </h5>
+                                <table class="data-table" style="margin: 0; width: 100%; box-shadow: none; font-size: 0.85rem;">
+                                    <thead>
+                                        <tr>
+                                            <th>進貨單號</th>
+                                            <th>進貨日期</th>
+                                            <th>廠商</th>
+                                            <th>進貨成本</th>
+                                            <th>數量</th>
+                                            <th>小計</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${detailRowsHtml}
+                                    </tbody>
+                                </table>
+                            </div>
+                            
+                            <!-- 右欄：出貨歷史記錄 -->
+                            <div style="padding: 12px 18px; border-left: 3px solid var(--success, #10b981); background: rgba(0,0,0,0.005); border-radius: 0 8px 8px 0;">
+                                <h5 style="margin: 0 0 10px 0; font-size: 0.85rem; color: var(--text-muted);">
+                                    <i class="ph ph-trend-up"></i> 商品出貨歷史記錄
+                                </h5>
+                                <table class="data-table" style="margin: 0; width: 100%; box-shadow: none; font-size: 0.85rem;">
+                                    <thead>
+                                        <tr>
+                                            <th>出貨單號</th>
+                                            <th>出貨日期</th>
+                                            <th>客戶</th>
+                                            <th>售價</th>
+                                            <th>數量</th>
+                                            <th>小計</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${salesDetailRowsHtml}
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
                     </td>
                 </tr>

@@ -1184,7 +1184,7 @@
                 await db.products.clear();
             });
 
-            await runTestCase('測試案例 24：驗證商品庫存清單折疊式展開與進貨記錄渲染邏輯', async (log) => {
+            await runTestCase('測試案例 24：驗證商品庫存清單折疊式展開與進銷歷史記錄渲染邏輯', async (log) => {
                 if (window.indexHtmlContent) {
                     log('1. 解析主 index.html 原始碼中的 tpl-products 範本');
                     const parser = new DOMParser();
@@ -1198,29 +1198,35 @@
                     const firstTh = tempDiv.querySelector('thead th');
                     assert(!!firstTh && firstTh.style.width === '40px', '表頭第一個 th 應配置 width: 40px');
 
-                    log('3. 驗證商品表格 thead 總列數應為 9 欄');
+                    log('3. 驗證商品表格 thead 總列數應為 10 欄');
                     const ths = tempDiv.querySelectorAll('thead th');
-                    assert(ths.length === 9, `表頭欄位數應為 9，實際為 ${ths.length}`);
+                    assert(ths.length === 10, `表頭欄位數應為 10，實際為 ${ths.length}`);
 
-                    log('4. 驗證載入提示列的 colspan 是否配置為 9');
+                    log('4. 驗證載入提示列的 colspan 是否配置為 10');
                     const tbodyTd = tempDiv.querySelector('tbody td');
-                    assert(tbodyTd && tbodyTd.getAttribute('colspan') === '9', '載入中列的 colspan 應為 9');
+                    assert(tbodyTd && tbodyTd.getAttribute('colspan') === '10', '載入中列的 colspan 應為 10');
 
                     log('5. 驗證表頭中是否包含「平均單位成本」且不包含「進貨成本」');
                     const hasAvgCostTh = Array.from(ths).some(th => th.innerText.includes('平均單位成本'));
                     const hasOldCostTh = Array.from(ths).some(th => th.innerText.includes('進貨成本'));
                     assert(hasAvgCostTh, '商品表頭未發現「平均單位成本」欄位');
                     assert(!hasOldCostTh, '商品表頭仍殘留「進貨成本」欄位');
+
+                    log('5-1. 驗證表頭中是否包含「出貨單數」');
+                    const hasSalesOrderTh = Array.from(ths).some(th => th.innerText.includes('出貨單數'));
+                    assert(hasSalesOrderTh, '商品表頭未發現「出貨單數」欄位');
                 } else {
                     log('⚠️ 非無頭瀏覽器環境，略過 index.html DOM 驗證。');
                 }
 
                 if (window.jsAppContent) {
-                    log('6. 驗證 renderProducts() 是否載入了 purchases 與 suppliers 資料');
+                    log('6. 驗證 renderProducts() 是否載入了 products, purchases, sales, suppliers, customers 資料表');
                     const hasPromiseAll = window.jsAppContent.includes("DB.getAll('products')") &&
                                           window.jsAppContent.includes("DB.getAll('purchases')") &&
-                                          window.jsAppContent.includes("DB.getAll('suppliers')");
-                    assert(hasPromiseAll, 'renderProducts() 中未發現同時 Promise.all 載入 products, purchases 與 suppliers 的邏輯');
+                                          window.jsAppContent.includes("DB.getAll('sales')") &&
+                                          window.jsAppContent.includes("DB.getAll('suppliers')") &&
+                                          window.jsAppContent.includes("DB.getAll('customers')");
+                    assert(hasPromiseAll, 'renderProducts() 中未發現同時 Promise.all 載入五表的邏輯');
 
                     log('7. 驗證商品列表渲染中是否包含 toggleOrderDetail 點擊呼叫');
                     const hasToggleCall = window.jsAppContent.includes("toggleOrderDetail") &&
@@ -1233,31 +1239,45 @@
                                         window.jsAppContent.includes("product-modal");
                     assert(hasPropStop, '商品操作列按鈕（修改、刪除）未配置 event.stopPropagation()');
 
-                    log('9. 驗證子明細表格是否包含進貨單號、進貨日期、廠商、成本、數量、小計的表頭配置');
-                    const hasHeaders = window.jsAppContent.includes("進貨單號") &&
-                                       window.jsAppContent.includes("進貨日期") &&
-                                       window.jsAppContent.includes("廠商") &&
-                                       window.jsAppContent.includes("進貨成本") &&
-                                       window.jsAppContent.includes("數量") &&
-                                       window.jsAppContent.includes("小計");
-                    assert(hasHeaders, '商品進貨歷史子明細表格中未配置正確的欄位表頭');
+                    log('9. 驗證子明細表格是否包含進貨與出貨歷史記錄之表頭與空值防錯提示');
+                    const hasPurchaseHeaders = window.jsAppContent.includes("進貨單號") &&
+                                               window.jsAppContent.includes("進貨日期") &&
+                                               window.jsAppContent.includes("廠商") &&
+                                               window.jsAppContent.includes("進貨成本") &&
+                                               window.jsAppContent.includes("數量") &&
+                                               window.jsAppContent.includes("小計");
+                    const hasSalesHeaders = window.jsAppContent.includes("出貨單號") &&
+                                            window.jsAppContent.includes("出貨日期") &&
+                                            window.jsAppContent.includes("客戶") &&
+                                            window.jsAppContent.includes("售價") &&
+                                            window.jsAppContent.includes("數量") &&
+                                            window.jsAppContent.includes("小計");
+                    const hasNoSalesAlert = window.jsAppContent.includes("尚無此商品的出貨記錄");
+                    assert(hasPurchaseHeaders, '商品進貨歷史表格中未配置正確的欄位表頭');
+                    assert(hasSalesHeaders, '商品出貨歷史表格中未配置正確的欄位表頭');
+                    assert(hasNoSalesAlert, '商品出貨歷史表格中未發現尚無出貨的防錯提示字串');
 
                     log('10. 驗證是否包含不重複進貨單數（purchaseOrderCount）的統計邏輯');
                     const hasOrderCount = window.jsAppContent.includes("purchaseOrderCount") &&
                                           (window.jsAppContent.includes("orderIds") || window.jsAppContent.includes("Set"));
                     assert(hasOrderCount, 'renderProducts() 中未發現計算不重複進貨單數的統計邏輯');
 
-                    log('11. 驗證 detail-row 子明細列旁的 colspan 是否已調整為 8');
-                    const hasColspan8 = window.jsAppContent.includes("colspan=\"8\"") &&
+                    log('10-1. 驗證是否包含不重複出貨單數（salesOrderCount）的統計邏輯');
+                    const hasSalesOrderCount = window.jsAppContent.includes("salesOrderCount") &&
+                                               (window.jsAppContent.includes("salesOrderIds") || window.jsAppContent.includes("Set"));
+                    assert(hasSalesOrderCount, 'renderProducts() 中未發現計算不重複出貨單數的統計邏輯');
+
+                    log('11. 驗證 detail-row 子明細列旁的 colspan 是否已調整為 9');
+                    const hasColspan9 = window.jsAppContent.includes("colspan=\"9\"") &&
                                         window.jsAppContent.includes("detail-row");
-                    assert(hasColspan8, 'detail-row 子明細列中未配置正確的 colspan="8"');
+                    assert(hasColspan9, 'detail-row 子明細列中未配置正確的 colspan="9"');
 
                     log('12. 驗證是否包含動態平均單位成本（avgUnitCost）之加權計算與格式化邏輯');
                     const hasAvgCostCalc = window.jsAppContent.includes("totalCostSum") &&
                                            window.jsAppContent.includes("totalQtySum") &&
                                            (window.jsAppContent.includes("avgUnitCost") || window.jsAppContent.includes("totalCostSum / totalQtySum")) &&
                                            (window.jsAppContent.includes("toFixed(2)") || window.jsAppContent.includes("toFixed"));
-                    assert(hasAvgCostCalc, 'renderProducts() 中未發現動態加權平均單位成本的計算或格式化邏輯');
+                    assert(hasAvgCostCalc, 'renderProducts() 中未發現動態加權平均單位成本 the 計算或格式化邏輯');
 
                     log('13. 驗證商品 Modal 的 HTML 範本中已移除進貨成本、單位與供應商 ID 輸入框');
                     const isCostRemoved = !window.jsAppContent.includes("id=\"m-cost\"");
