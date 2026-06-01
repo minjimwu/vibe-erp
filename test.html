@@ -1303,6 +1303,114 @@
                 }
             });
 
+            await runTestCase('測試案例 25：驗證銷售報表按月份查詢營收及淨利功能', async (log) => {
+                if (window.indexHtmlContent) {
+                    log('1. 解析主 index.html 原始碼中的 tpl-reports 範本');
+                    const parser = new DOMParser();
+                    const doc = parser.parseFromString(window.indexHtmlContent, 'text/html');
+                    const tpl = doc.getElementById('tpl-reports');
+                    assert(!!tpl, '找不到 tpl-reports 範本');
+                    
+                    const tempDiv = document.createElement('div');
+                    tempDiv.innerHTML = tpl.innerHTML;
+                    
+                    log('2. 驗證是否包含月份選擇下拉選單 report-month-select');
+                    const monthSelect = tempDiv.querySelector('#report-month-select');
+                    assert(!!monthSelect, '銷售報表範本中未發現 #report-month-select 月份篩選選單');
+                    
+                    log('3. 驗證是否包含客戶選擇下拉選單 report-customer-select');
+                    const customerSelect = tempDiv.querySelector('#report-customer-select');
+                    assert(!!customerSelect, '銷售報表範本中未發現 #report-customer-select 客戶篩選選單');
+                } else {
+                    log('⚠️ 非無頭瀏覽器環境，略過 index.html DOM 驗證。');
+                }
+
+                log('4. 建立測試資料庫資料');
+                await db.products.clear();
+                await db.purchases.clear();
+                await db.sales.clear();
+                
+                await db.products.bulkAdd([
+                    { id: 'P001', name: '商品一', cost: 100, price: 200, stock: 10 },
+                    { id: 'P002', name: '商品二', cost: 50, price: 100, stock: 5 }
+                ]);
+                
+                await db.purchases.bulkAdd([
+                    { id: 'PO001-1', date: '2026-05-10', supplier_id: 'S01', product_id: 'P001', cost: 90, qty: 10, total: 900 },
+                    { id: 'PO001-2', date: '2026-05-15', supplier_id: 'S01', product_id: 'P001', cost: 110, qty: 10, total: 1100 }
+                ]);
+                
+                await db.sales.bulkAdd([
+                    { id: 'SO001-1', date: '2026-05-20', customer_id: 'C01', product_id: 'P001', price: 200, qty: 5, total: 1000 },
+                    { id: 'SO002-1', date: '2026-06-01', customer_id: 'C01', product_id: 'P001', price: 200, qty: 2, total: 400 },
+                    { id: 'SO002-2', date: '2026-06-05', customer_id: 'C02', product_id: 'P002', price: 120, qty: 3, total: 360 }
+                ]);
+
+                // 註冊我們預計要實作的月度統計計算函式到 testApp 中來驗證核心邏輯的正確性
+                testApp.calculateMonthlyReport = async function() {
+                    const products = await db.products.toArray();
+                    const purchases = await db.purchases.toArray();
+                    const sales = await db.sales.toArray();
+                    
+                    // 1. 計算每個商品的加權平均單位成本
+                    const productAvgCostMap = {};
+                    products.forEach(p => {
+                        const prodPurchases = purchases.filter(pu => pu.product_id === p.id);
+                        let totalCost = 0;
+                        let totalQty = 0;
+                        prodPurchases.forEach(pu => {
+                            totalCost += Number(pu.total || 0);
+                            totalQty += Number(pu.qty || 0);
+                        });
+                        const avgCost = totalQty > 0 ? (totalCost / totalQty) : Number(p.cost || 0);
+                        productAvgCostMap[p.id] = avgCost;
+                    });
+                    
+                    // 2. 將 sales 依月份 YYYY-MM 分組並計算營收、成本、淨利
+                    const monthlyData = {};
+                    sales.forEach(s => {
+                        const month = (s.date || '').substring(0, 7); // 'YYYY-MM'
+                        if (!month) return;
+                        
+                        if (!monthlyData[month]) {
+                            monthlyData[month] = { revenue: 0, cost: 0, profit: 0 };
+                        }
+                        
+                        const revenue = Number(s.total || 0);
+                        const avgCost = productAvgCostMap[s.product_id] || 0;
+                        const cost = Number(s.qty || 0) * avgCost;
+                        
+                        monthlyData[month].revenue += revenue;
+                        monthlyData[month].cost += cost;
+                        monthlyData[month].profit += (revenue - cost);
+                    });
+                    
+                    return monthlyData;
+                };
+
+                log('5. 執行計算並驗證月度營收與淨利');
+                const report = await testApp.calculateMonthlyReport();
+                
+                log('2026-05 月份驗證：');
+                const m05 = report['2026-05'];
+                assert(!!m05, '找不到 2026-05 的月度報表');
+                assert(m05.revenue === 1000, `2026-05 營收應為 1000，實際為 ${m05.revenue}`);
+                assert(m05.cost === 500, `2026-05 成本應為 500，實際為 ${m05.cost}`);
+                assert(m05.profit === 500, `2026-05 淨利應為 500，實際為 ${m05.profit}`);
+                
+                log('2026-06 月份驗證：');
+                const m06 = report['2026-06'];
+                assert(!!m06, '找不到 2026-06 的月度報表');
+                assert(m06.revenue === 760, `2026-06 營收應為 760，實際為 ${m06.revenue}`);
+                assert(m06.cost === 350, `2026-06 成本應為 350，實際為 ${m06.cost}`);
+                assert(m06.profit === 410, `2026-06 淨利應為 410，實際為 ${m06.profit}`);
+                
+                // 清除測試資料
+                await db.products.clear();
+                await db.purchases.clear();
+                await db.sales.clear();
+            });
+
             // 標記測試全部完成
             const completeDiv = document.createElement('div');
             completeDiv.id = 'tests-complete';

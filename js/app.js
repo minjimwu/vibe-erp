@@ -992,51 +992,255 @@ const app = {
     },
 
     async renderReports() {
+        const products = await DB.getAll('products');
+        const purchases = await DB.getAll('purchases');
         const customers = await DB.getAll('customers');
         const sales = await DB.getAll('sales');
-        const select = document.getElementById('report-customer-select');
-        const tbody = document.getElementById('reports-tbody');
-        const totalSpan = document.getElementById('report-total');
 
-        if (!select || !tbody) return;
+        const monthSelect = document.getElementById('report-month-select');
+        const customerSelect = document.getElementById('report-customer-select');
+        const reportTable = document.getElementById('report-table');
+        
+        const revCard = document.getElementById('report-total-revenue');
+        const costCard = document.getElementById('report-total-cost');
+        const profitCard = document.getElementById('report-total-profit');
+        const marginCard = document.getElementById('report-total-margin');
+        const oldTotalSpan = document.getElementById('report-total');
+        
+        if (!reportTable || !customerSelect || !monthSelect) return;
 
-        // Fill customer select if empty (keep current selection if exists)
-        const currentVal = select.value;
-        select.innerHTML = '<option value="">所有客戶</option>' + 
+        // Calculate weighted average unit cost for each product
+        const productAvgCostMap = new Map();
+        products.forEach(p => {
+            const itemPurchases = purchases.filter(pu => pu.product_id === p.id);
+            let totalCostSum = 0;
+            let totalQtySum = 0;
+            itemPurchases.forEach(pu => {
+                totalCostSum += Number(pu.total || 0);
+                totalQtySum += Number(pu.qty || 0);
+            });
+            const avgUnitCost = totalQtySum > 0 ? (totalCostSum / totalQtySum) : Number(p.cost || 0);
+            productAvgCostMap.set(p.id, avgUnitCost);
+        });
+
+        // Fill month select dynamically based on sales dates
+        const months = [...new Set(sales.map(s => (s.date || '').substring(0, 7)))].filter(Boolean);
+        months.sort((a, b) => b.localeCompare(a));
+        const currentMonthVal = monthSelect.value;
+        monthSelect.innerHTML = '<option value="">所有月份</option>' + 
+            months.map(m => `<option value="${m}">${m}</option>`).join('');
+        monthSelect.value = currentMonthVal;
+
+        // Fill customer select
+        const currentCustVal = customerSelect.value;
+        customerSelect.innerHTML = '<option value="">所有客戶</option>' + 
             customers.map(c => `<option value="${c.id}">${c.name} (${c.id})</option>`).join('');
-        select.value = currentVal;
+        customerSelect.value = currentCustVal;
 
         const filterAndRender = () => {
-            const cid = select.value;
-            const filtered = cid ? sales.filter(s => s.customer_id === cid) : sales;
-            
-            // Sort by Date DESC
-            filtered.sort((a, b) => new Date(b.date) - new Date(a.date));
+            const selectedMonth = monthSelect.value;
+            const selectedCust = customerSelect.value;
 
-            if (!filtered.length) {
-                tbody.innerHTML = '<tr><td colspan="7" class="text-center">尚無符合條件的銷售紀錄。</td></tr>';
-                totalSpan.innerText = '$0';
-                return;
+            // 1. Filter sales based on month and customer
+            let filteredSales = sales;
+            if (selectedMonth) {
+                filteredSales = filteredSales.filter(s => (s.date || '').startsWith(selectedMonth));
+            }
+            if (selectedCust) {
+                filteredSales = filteredSales.filter(s => s.customer_id === selectedCust);
             }
 
-            tbody.innerHTML = filtered.map(item => `
-                <tr>
-                    <td>${item.id || ''}</td>
-                    <td>${item.date || ''}</td>
-                    <td>${item.customer_id || ''}</td>
-                    <td>${item.product_id || ''}</td>
-                    <td>$${Number(item.price || 0).toLocaleString()}</td>
-                    <td>${item.qty || 0}</td>
-                    <td><strong>$${Number(item.total || 0).toLocaleString()}</strong></td>
-                </tr>
-            `).join('');
+            // 2. Calculate KPI stats
+            let totalRevenue = 0;
+            let totalCost = 0;
+            
+            filteredSales.forEach(s => {
+                const revenue = Number(s.total || 0);
+                const avgCost = productAvgCostMap.get(s.product_id) || 0;
+                const cost = Number(s.qty || 0) * avgCost;
+                
+                totalRevenue += revenue;
+                totalCost += cost;
+            });
+            
+            const totalProfit = totalRevenue - totalCost;
+            const averageMargin = totalRevenue > 0 ? (totalProfit / totalRevenue) * 100 : 0;
+            
+            // Update KPI cards UI
+            if (revCard) revCard.innerText = `$${totalRevenue.toLocaleString()}`;
+            if (costCard) costCard.innerText = `$${totalCost.toLocaleString()}`;
+            if (profitCard) {
+                profitCard.innerText = `$${totalProfit.toLocaleString()}`;
+                profitCard.style.color = totalProfit < 0 ? 'var(--danger)' : 'var(--secondary)';
+            }
+            if (marginCard) {
+                marginCard.innerText = `${averageMargin.toFixed(2)}%`;
+                marginCard.style.color = averageMargin < 0 ? 'var(--danger)' : 'var(--primary)';
+            }
+            if (oldTotalSpan) oldTotalSpan.innerText = `$${totalRevenue.toLocaleString()}`;
 
-            const total = filtered.reduce((sum, s) => sum + (s.total || 0), 0);
-            totalSpan.innerText = `$${total.toLocaleString()}`;
+            // 3. Render Table
+            if (!selectedMonth) {
+                // Mode A: Monthly revenue & net profit summary
+                const monthlyGroups = {};
+                filteredSales.forEach(s => {
+                    const month = (s.date || '').substring(0, 7);
+                    if (!month) return;
+                    if (!monthlyGroups[month]) {
+                        monthlyGroups[month] = { revenue: 0, cost: 0, profit: 0 };
+                    }
+                    const revenue = Number(s.total || 0);
+                    const avgCost = productAvgCostMap.get(s.product_id) || 0;
+                    const cost = Number(s.qty || 0) * avgCost;
+                    
+                    monthlyGroups[month].revenue += revenue;
+                    monthlyGroups[month].cost += cost;
+                    monthlyGroups[month].profit += (revenue - cost);
+                });
+                
+                const sortedMonths = Object.keys(monthlyGroups).sort((a, b) => b.localeCompare(a));
+                
+                if (sortedMonths.length === 0) {
+                    reportTable.innerHTML = `
+                        <thead>
+                            <tr>
+                                <th>月份</th>
+                                <th>營業額 (營收)</th>
+                                <th>銷貨成本</th>
+                                <th>總淨利</th>
+                                <th>平均毛利率</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr><td colspan="5" class="text-center">尚無符合條件的銷售紀錄。</td></tr>
+                        </tbody>
+                    `;
+                    return;
+                }
+                
+                const tbodyHtml = sortedMonths.map(m => {
+                    const group = monthlyGroups[m];
+                    const margin = group.revenue > 0 ? (group.profit / group.revenue) * 100 : 0;
+                    const profitColor = group.profit < 0 ? 'var(--danger)' : 'var(--secondary)';
+                    
+                    return `
+                        <tr>
+                            <td><a href="#" style="color: var(--primary); text-decoration: underline; font-weight: bold;" onclick="event.preventDefault(); app.setReportMonth('${m}')">${m}</a></td>
+                            <td class="amount">$${group.revenue.toLocaleString()}</td>
+                            <td class="amount">$${group.cost.toLocaleString()}</td>
+                            <td class="amount" style="color: ${profitColor}; font-weight: bold;">$${group.profit.toLocaleString()}</td>
+                            <td class="amount">${margin.toFixed(2)}%</td>
+                        </tr>
+                    `;
+                }).join('');
+                
+                reportTable.innerHTML = `
+                    <thead>
+                        <tr>
+                            <th>月份</th>
+                            <th>營業額 (營收)</th>
+                            <th>銷貨成本</th>
+                            <th>總淨利</th>
+                            <th>平均毛利率</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${tbodyHtml}
+                    </tbody>
+                `;
+            } else {
+                // Mode B: Monthly detail list
+                filteredSales.sort((a, b) => new Date(b.date) - new Date(a.date));
+                
+                if (filteredSales.length === 0) {
+                    reportTable.innerHTML = `
+                        <thead>
+                            <tr>
+                                <th>出貨單號</th>
+                                <th>日期</th>
+                                <th>客戶</th>
+                                <th>產品</th>
+                                <th>售價單價</th>
+                                <th>數量</th>
+                                <th>總額</th>
+                                <th>單位成本</th>
+                                <th>商品成本</th>
+                                <th>商品淨利</th>
+                                <th>毛利率</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr><td colspan="11" class="text-center">尚無符合條件的銷售紀錄。</td></tr>
+                        </tbody>
+                    `;
+                    return;
+                }
+                
+                const customerMap = new Map(customers.map(c => [c.id, c.name]));
+                const productMap = new Map(products.map(p => [p.id, p.name]));
+                
+                const tbodyHtml = filteredSales.map(item => {
+                    const revenue = Number(item.total || 0);
+                    const avgCost = productAvgCostMap.get(item.product_id) || 0;
+                    const cost = Number(item.qty || 0) * avgCost;
+                    const profit = revenue - cost;
+                    const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
+                    
+                    const custName = customerMap.get(item.customer_id) || item.customer_id;
+                    const prodName = productMap.get(item.product_id) || item.product_id;
+                    const profitColor = profit < 0 ? 'var(--danger)' : 'var(--secondary)';
+                    
+                    return `
+                        <tr>
+                            <td>${item.id || ''}</td>
+                            <td>${item.date || ''}</td>
+                            <td>${custName}</td>
+                            <td>${prodName} (${item.product_id || ''})</td>
+                            <td class="amount">$${Number(item.price || 0).toLocaleString()}</td>
+                            <td>${item.qty || 0}</td>
+                            <td class="amount"><strong>$${revenue.toLocaleString()}</strong></td>
+                            <td class="amount">$${Number(avgCost.toFixed(2)).toLocaleString()}</td>
+                            <td class="amount">$${Number(cost.toFixed(2)).toLocaleString()}</td>
+                            <td class="amount" style="color: ${profitColor}; font-weight: 500;">$${Number(profit.toFixed(2)).toLocaleString()}</td>
+                            <td class="amount">${margin.toFixed(2)}%</td>
+                        </tr>
+                    `;
+                }).join('');
+                
+                reportTable.innerHTML = `
+                    <thead>
+                        <tr>
+                            <th>出貨單號</th>
+                            <th>日期</th>
+                            <th>客戶</th>
+                            <th>產品</th>
+                            <th>售價單價</th>
+                            <th>數量</th>
+                            <th>總額</th>
+                            <th>單位成本</th>
+                            <th>商品成本</th>
+                            <th>商品淨利</th>
+                            <th>毛利率</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${tbodyHtml}
+                    </tbody>
+                `;
+            }
         };
 
-        select.onchange = filterAndRender;
+        monthSelect.onchange = filterAndRender;
+        customerSelect.onchange = filterAndRender;
         filterAndRender();
+    },
+
+    setReportMonth(month) {
+        const monthSelect = document.getElementById('report-month-select');
+        if (monthSelect) {
+            monthSelect.value = month;
+            monthSelect.dispatchEvent(new Event('change'));
+        }
     },
 
     // --- Spreadsheet Logic (Handsontable integration) ---

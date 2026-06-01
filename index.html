@@ -298,31 +298,55 @@
 
     <template id="tpl-reports">
         <div class="glass-panel table-panel">
-            <div class="panel-header">
-                <h3>各客戶出貨查詢 & 銷售報表</h3>
+            <div class="panel-header" style="flex-wrap: wrap; gap: 1rem;">
+                <h3>銷售報表 (各月份營收及淨利)</h3>
                 <div class="filter-bar">
-                    <select id="report-customer-select" class="form-control">
+                    <select id="report-month-select" class="form-control" style="width: auto;">
+                        <option value="">所有月份</option>
+                    </select>
+                    <select id="report-customer-select" class="form-control" style="width: auto;">
                         <option value="">所有客戶</option>
                     </select>
                 </div>
             </div>
+            
+            <!-- KPI Cards -->
+            <div class="dashboard-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
+                <div class="glass-panel stat-card" style="padding: 1rem;">
+                    <div class="stat-icon" style="background: rgba(79, 70, 229, 0.1); color: var(--primary);"><i class="ph ph-hand-coins"></i></div>
+                    <div>
+                        <div class="stat-label">營業額 (營收)</div>
+                        <div class="stat-value" id="report-total-revenue" style="font-size: 1.25rem;">$0</div>
+                    </div>
+                </div>
+                <div class="glass-panel stat-card" style="padding: 1rem;">
+                    <div class="stat-icon warning" style="background: rgba(245, 158, 11, 0.1); color: var(--warning);"><i class="ph ph-calculator"></i></div>
+                    <div>
+                        <div class="stat-label">銷貨成本</div>
+                        <div class="stat-value" id="report-total-cost" style="font-size: 1.25rem;">$0</div>
+                    </div>
+                </div>
+                <div class="glass-panel stat-card" style="padding: 1rem;">
+                    <div class="stat-icon" style="background: rgba(16, 185, 129, 0.1); color: var(--secondary);"><i class="ph ph-trend-up"></i></div>
+                    <div>
+                        <div class="stat-label">總淨利</div>
+                        <div class="stat-value" id="report-total-profit" style="font-size: 1.25rem;">$0</div>
+                    </div>
+                </div>
+                <div class="glass-panel stat-card" style="padding: 1rem;">
+                    <div class="stat-icon" style="background: rgba(79, 70, 229, 0.05); color: var(--primary);"><i class="ph ph-percent"></i></div>
+                    <div>
+                        <div class="stat-label">平均毛利率</div>
+                        <div class="stat-value" id="report-total-margin" style="font-size: 1.25rem;">0.00%</div>
+                    </div>
+                </div>
+            </div>
+
             <div class="table-responsive">
-                <table class="data-table">
-                    <thead>
-                        <tr>
-                            <th>出貨單號</th>
-                            <th>日期</th>
-                            <th>客戶</th>
-                            <th>產品</th>
-                            <th>售價單價</th>
-                            <th>數量</th>
-                            <th>總額</th>
-                        </tr>
-                    </thead>
-                    <tbody id="reports-tbody">
-                    </tbody>
+                <table class="data-table" id="report-table">
+                    <!-- 由 js/app.js 動態渲染 index.html 的 report-table -->
                 </table>
-                <div class="report-summary">
+                <div class="report-summary" style="display: none;">
                     <div class="summary-item">查詢總營業額: <span id="report-total" class="amount">$0</span></div>
                 </div>
             </div>
