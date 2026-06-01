@@ -1136,6 +1136,153 @@
                 }
             });
 
+            await runTestCase('測試案例 22：驗證新增商品時自動產生預設產品代碼邏輯', async (log) => {
+                if (window.jsAppContent) {
+                    log('1. 驗證 showModal 內商品 Modal 邏輯是否呼叫 generateProductSequenceID()');
+                    const hasProductSeqId = window.jsAppContent.includes("if (type === 'product-modal')") && 
+                                             (window.jsAppContent.includes("generateProductSequenceID()") || 
+                                              window.jsAppContent.includes("generateProductSequenceID();"));
+                    assert(hasProductSeqId, '未在商品 Modal 區塊發現產生預設 ID 的 generateProductSequenceID() 呼叫');
+                } else {
+                    log('⚠️ 非無頭瀏覽器環境，略過 js/app.js 原始碼驗證。');
+                }
+            });
+
+            await runTestCase('測試案例 23：驗證流水號產生器 generateProductSequenceID 的運作邏輯與邊界條件', async (log) => {
+                // 動態註冊流水號產生器到 testApp
+                testApp.generateProductSequenceID = async function() {
+                    const keys = await db.products.toCollection().primaryKeys();
+                    const cleanKeys = keys.map(k => String(k).split('-')[0]);
+                    const pattern = /^\d+$/;
+                    const nums = cleanKeys
+                        .filter(k => pattern.test(k))
+                        .map(k => parseInt(k, 10));
+                    const maxNum = nums.length > 0 ? Math.max(...nums) : 0;
+                    const nextNum = maxNum + 1;
+                    return String(nextNum).padStart(7, '0');
+                };
+
+                log('1. 當商品表為空時，預設應回傳 0000001');
+                await db.products.clear();
+                const idEmpty = await testApp.generateProductSequenceID();
+                assert(idEmpty === '0000001', `預期 0000001，實際為 ${idEmpty}`);
+
+                log('2. 當商品表存在 P001、0000519 時，應正確過濾舊格式並回傳自增的 0000520');
+                await db.products.bulkAdd([
+                    { id: 'P001', name: '商品1', stock: 10 },
+                    { id: '0000519', name: '商品2', stock: 5 }
+                ]);
+                const idSeq = await testApp.generateProductSequenceID();
+                assert(idSeq === '0000520', `預期 0000520，實際為 ${idSeq}`);
+
+                log('3. 當商品表中混入帶前綴的 8 位數 ID 時，應被自動過濾忽略');
+                await db.products.add({ id: 'P0000302', name: '帶前綴商品', stock: 0 });
+                const idFilter = await testApp.generateProductSequenceID();
+                assert(idFilter === '0000520', `預期 0000520，實際為 ${idFilter}`);
+                
+                // 清理測試資料
+                await db.products.clear();
+            });
+
+            await runTestCase('測試案例 24：驗證商品庫存清單折疊式展開與進貨記錄渲染邏輯', async (log) => {
+                if (window.indexHtmlContent) {
+                    log('1. 解析主 index.html 原始碼中的 tpl-products 範本');
+                    const parser = new DOMParser();
+                    const doc = parser.parseFromString(window.indexHtmlContent, 'text/html');
+                    const tpl = doc.getElementById('tpl-products');
+                    assert(!!tpl, '找不到 tpl-products 範本');
+                    const tempDiv = document.createElement('div');
+                    tempDiv.innerHTML = tpl.innerHTML;
+
+                    log('2. 驗證商品表頭第一個 th 是否為 40px 的展開 Caret 欄位');
+                    const firstTh = tempDiv.querySelector('thead th');
+                    assert(!!firstTh && firstTh.style.width === '40px', '表頭第一個 th 應配置 width: 40px');
+
+                    log('3. 驗證商品表格 thead 總列數應為 9 欄');
+                    const ths = tempDiv.querySelectorAll('thead th');
+                    assert(ths.length === 9, `表頭欄位數應為 9，實際為 ${ths.length}`);
+
+                    log('4. 驗證載入提示列的 colspan 是否配置為 9');
+                    const tbodyTd = tempDiv.querySelector('tbody td');
+                    assert(tbodyTd && tbodyTd.getAttribute('colspan') === '9', '載入中列的 colspan 應為 9');
+
+                    log('5. 驗證表頭中是否包含「平均單位成本」且不包含「進貨成本」');
+                    const hasAvgCostTh = Array.from(ths).some(th => th.innerText.includes('平均單位成本'));
+                    const hasOldCostTh = Array.from(ths).some(th => th.innerText.includes('進貨成本'));
+                    assert(hasAvgCostTh, '商品表頭未發現「平均單位成本」欄位');
+                    assert(!hasOldCostTh, '商品表頭仍殘留「進貨成本」欄位');
+                } else {
+                    log('⚠️ 非無頭瀏覽器環境，略過 index.html DOM 驗證。');
+                }
+
+                if (window.jsAppContent) {
+                    log('6. 驗證 renderProducts() 是否載入了 purchases 與 suppliers 資料');
+                    const hasPromiseAll = window.jsAppContent.includes("DB.getAll('products')") &&
+                                          window.jsAppContent.includes("DB.getAll('purchases')") &&
+                                          window.jsAppContent.includes("DB.getAll('suppliers')");
+                    assert(hasPromiseAll, 'renderProducts() 中未發現同時 Promise.all 載入 products, purchases 與 suppliers 的邏輯');
+
+                    log('7. 驗證商品列表渲染中是否包含 toggleOrderDetail 點擊呼叫');
+                    const hasToggleCall = window.jsAppContent.includes("toggleOrderDetail") &&
+                                          window.jsAppContent.includes("item.id");
+                    assert(hasToggleCall, '商品列表渲染中未發現展開/收合 toggleOrderDetail 的調用');
+
+                    log('8. 驗證操作列按鈕是否包含 event.stopPropagation() 以防止點擊事件冒泡');
+                    const hasPropStop = window.jsAppContent.includes("event.stopPropagation()") &&
+                                        window.jsAppContent.includes("deleteRecord") &&
+                                        window.jsAppContent.includes("product-modal");
+                    assert(hasPropStop, '商品操作列按鈕（修改、刪除）未配置 event.stopPropagation()');
+
+                    log('9. 驗證子明細表格是否包含進貨單號、進貨日期、廠商、成本、數量、小計的表頭配置');
+                    const hasHeaders = window.jsAppContent.includes("進貨單號") &&
+                                       window.jsAppContent.includes("進貨日期") &&
+                                       window.jsAppContent.includes("廠商") &&
+                                       window.jsAppContent.includes("進貨成本") &&
+                                       window.jsAppContent.includes("數量") &&
+                                       window.jsAppContent.includes("小計");
+                    assert(hasHeaders, '商品進貨歷史子明細表格中未配置正確的欄位表頭');
+
+                    log('10. 驗證是否包含不重複進貨單數（purchaseOrderCount）的統計邏輯');
+                    const hasOrderCount = window.jsAppContent.includes("purchaseOrderCount") &&
+                                          (window.jsAppContent.includes("orderIds") || window.jsAppContent.includes("Set"));
+                    assert(hasOrderCount, 'renderProducts() 中未發現計算不重複進貨單數的統計邏輯');
+
+                    log('11. 驗證 detail-row 子明細列旁的 colspan 是否已調整為 8');
+                    const hasColspan8 = window.jsAppContent.includes("colspan=\"8\"") &&
+                                        window.jsAppContent.includes("detail-row");
+                    assert(hasColspan8, 'detail-row 子明細列中未配置正確的 colspan="8"');
+
+                    log('12. 驗證是否包含動態平均單位成本（avgUnitCost）之加權計算與格式化邏輯');
+                    const hasAvgCostCalc = window.jsAppContent.includes("totalCostSum") &&
+                                           window.jsAppContent.includes("totalQtySum") &&
+                                           (window.jsAppContent.includes("avgUnitCost") || window.jsAppContent.includes("totalCostSum / totalQtySum")) &&
+                                           (window.jsAppContent.includes("toFixed(2)") || window.jsAppContent.includes("toFixed"));
+                    assert(hasAvgCostCalc, 'renderProducts() 中未發現動態加權平均單位成本的計算或格式化邏輯');
+
+                    log('13. 驗證商品 Modal 的 HTML 範本中已移除進貨成本、單位與供應商 ID 輸入框');
+                    const isCostRemoved = !window.jsAppContent.includes("id=\"m-cost\"");
+                    const isUnitRemoved = !window.jsAppContent.includes("id=\"m-unit\"");
+                    const isSupplierIdRemoved = !window.jsAppContent.includes("id=\"m-supplier-id\"");
+                    assert(isCostRemoved, '商品 Modal 中仍殘留進貨成本 m-cost 輸入框');
+                    assert(isUnitRemoved, '商品 Modal 中仍殘留單位 m-unit 輸入框');
+                    assert(isSupplierIdRemoved, '商品 Modal 中仍殘留供應商 ID m-supplier-id 輸入框');
+
+                    log('14. 驗證商品 Modal 的庫存量 m-stock 欄位在新增時預設為 0');
+                    const hasStockDefault = window.jsAppContent.includes("id=\"m-stock\"") &&
+                                            window.jsAppContent.includes("value=\"${oldVal ? (oldVal.stock || 0) : '0'}\"");
+                    assert(hasStockDefault, '商品 Modal 庫存量 m-stock 未在新增時預設為 0');
+
+                    log('15. 驗證 saveHandler 儲存時是否安全後備讀取 cost, unit, supplier_id 欄位以防止錯誤');
+                    const hasSafeSave = window.jsAppContent.includes("cost = ") &&
+                                        window.jsAppContent.includes("unit = ") &&
+                                        window.jsAppContent.includes("supplier_id = ") &&
+                                        window.jsAppContent.includes("currentOldVal");
+                    assert(hasSafeSave, 'saveHandler 中未發現基於 currentOldVal 的欄位安全儲存後備邏輯');
+                } else {
+                    log('⚠️ 非無頭瀏覽器環境，略過 js/app.js 原始碼驗證。');
+                }
+            });
+
             // 標記測試全部完成
             const completeDiv = document.createElement('div');
             completeDiv.id = 'tests-complete';

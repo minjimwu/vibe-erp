@@ -190,9 +190,22 @@ const app = {
     },
 
     async renderProducts() {
-        const data = await DB.getAll('products');
+        const [data, purchases, suppliers] = await Promise.all([
+            DB.getAll('products'),
+            DB.getAll('purchases'),
+            DB.getAll('suppliers')
+        ]);
         const tbody = document.getElementById('products-tbody');
         const filterSel = document.getElementById('product-category-filter');
+
+        const supplierMap = new Map(suppliers.map(s => [s.id, s.name]));
+        const productPurchasesMap = new Map();
+        purchases.forEach(p => {
+            if (!productPurchasesMap.has(p.product_id)) {
+                productPurchasesMap.set(p.product_id, []);
+            }
+            productPurchasesMap.get(p.product_id).push(p);
+        });
 
         // Populate category filter options dynamically
         if (filterSel) {
@@ -214,22 +227,85 @@ const app = {
             return;
         }
 
-        tbody.innerHTML = filteredData.map(item => `
-            <tr>
-                <td>${item.id || ''}</td>
-                <td><span class="category-badge">${item.category || ''}</span></td>
-                <td><strong>${item.name || ''}</strong></td>
-                <td>$${Number(item.cost || 0).toLocaleString()}</td>
-                <td>$${Number(item.price || 0).toLocaleString()}</td>
-                <td><span style="color: ${Number(item.stock) < 10 ? 'var(--danger)' : 'inherit'}">${item.stock || 0}</span></td>
-                <td>${item.unit || ''}</td>
-                <td>${item.supplier_id || ''}</td>
-                <td>
-                    <button class="btn btn-sm btn-outline" style="margin-right: 4px;" onclick="app.showModal('product-modal', '${item.id}')">修改</button>
-                    <button class="btn btn-sm btn-outline btn-danger" style="color: var(--danger); border-color: rgba(220,38,38,0.2);" onclick="app.deleteRecord('products', '${item.id}')">刪除</button>
-                </td>
-            </tr>
-        `).join('');
+        tbody.innerHTML = filteredData.map(item => {
+            const itemPurchases = productPurchasesMap.get(item.id) || [];
+            // Sort by Date DESC
+            itemPurchases.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+            // Calculate unique purchase order count
+            const orderIds = new Set(itemPurchases.map(p => (p.id || '').split('-')[0]));
+            const purchaseOrderCount = orderIds.size;
+
+            // Calculate weighted average unit cost
+            let totalCostSum = 0;
+            let totalQtySum = 0;
+            itemPurchases.forEach(p => {
+                totalCostSum += Number(p.total || 0);
+                totalQtySum += Number(p.qty || 0);
+            });
+            const avgUnitCost = totalQtySum > 0 ? (totalCostSum / totalQtySum) : Number(item.cost || 0);
+
+            const detailRowsHtml = itemPurchases.length > 0 
+                ? itemPurchases.map(p => {
+                    const orderId = (p.id || '').split('-')[0];
+                    const supplierName = supplierMap.get(p.supplier_id) || '未知廠商';
+                    return `
+                        <tr>
+                            <td>${orderId}</td>
+                            <td>${p.date || ''}</td>
+                            <td>${p.supplier_id ? `${p.supplier_id} (${supplierName})` : '未知廠商'}</td>
+                            <td>$${Number(p.cost || 0).toLocaleString()}</td>
+                            <td>${p.qty || 0}</td>
+                            <td><strong>$${Number(p.total || 0).toLocaleString()}</strong></td>
+                        </tr>
+                    `;
+                  }).join('')
+                : `<tr><td colspan="6" class="text-center" style="color: var(--text-muted);">尚無此商品的進貨記錄。</td></tr>`;
+
+            return `
+                <tr class="main-order-row" style="cursor: pointer;" onclick="app.toggleOrderDetail('${item.id}')">
+                    <td class="text-center" id="arrow-${item.id}">
+                        <i class="ph ph-caret-right" style="transition: transform 0.2s; font-size: 1.1rem; color: var(--primary);"></i>
+                    </td>
+                    <td>${item.id || ''}</td>
+                    <td><span class="category-badge">${item.category || ''}</span></td>
+                    <td><strong>${item.name || ''}</strong></td>
+                    <td>$${Number(avgUnitCost.toFixed(2)).toLocaleString()}</td>
+                    <td>$${Number(item.price || 0).toLocaleString()}</td>
+                    <td><span style="color: ${Number(item.stock) < 10 ? 'var(--danger)' : 'inherit'}">${item.stock || 0}</span></td>
+                    <td>${purchaseOrderCount}</td>
+                    <td onclick="event.stopPropagation();">
+                        <button class="btn btn-sm btn-outline" style="margin-right: 4px;" onclick="app.showModal('product-modal', '${item.id}')">修改</button>
+                        <button class="btn btn-sm btn-outline btn-danger" style="color: var(--danger); border-color: rgba(220,38,38,0.2);" onclick="app.deleteRecord('products', '${item.id}')">刪除</button>
+                    </td>
+                </tr>
+                <tr class="detail-row" id="detail-row-${item.id}" style="display: none; background: rgba(0,0,0,0.01);">
+                    <td></td>
+                    <td colspan="8">
+                        <div style="padding: 12px 18px; border-left: 3px solid var(--primary); background: rgba(0,0,0,0.005); border-radius: 0 8px 8px 0; margin: 4px 0 10px 0;">
+                            <h5 style="margin: 0 0 10px 0; font-size: 0.85rem; color: var(--text-muted);">
+                                <i class="ph ph-clock-counter-clockwise"></i> 商品進貨歷史記錄
+                            </h5>
+                            <table class="data-table" style="margin: 0; width: 100%; box-shadow: none; font-size: 0.85rem;">
+                                <thead>
+                                    <tr>
+                                        <th>進貨單號</th>
+                                        <th>進貨日期</th>
+                                        <th>廠商</th>
+                                        <th>進貨成本</th>
+                                        <th>數量</th>
+                                        <th>小計</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${detailRowsHtml}
+                                </tbody>
+                            </table>
+                        </div>
+                    </td>
+                </tr>
+            `;
+        }).join('');
     },
 
     filterProducts() {
@@ -1462,7 +1538,7 @@ const app = {
             mTitle.innerText = isEdit ? '編輯商品' : '新增商品';
             
             const oldVal = isEdit ? await db.products.get(extraData) : null;
-            const defaultId = isEdit ? extraData : '';
+            const defaultId = isEdit ? extraData : await this.generateProductSequenceID();
             
             const allProducts = await db.products.toArray();
             const categories = [...new Set(allProducts.map(p => p.category).filter(Boolean))].sort();
@@ -1481,11 +1557,8 @@ const app = {
                         <button type="button" id="btn-toggle-category" class="btn btn-sm btn-outline" style="white-space: nowrap; padding: 4px 8px; font-size: 0.8rem; height: 36px;">+ 新增</button>
                     </div>
                 </div>
-                <div class="form-group"><label>進貨成本</label><input type="number" id="m-cost" class="form-control" value="${oldVal ? (oldVal.cost || 0) : ''}"></div>
                 <div class="form-group"><label>預計售價</label><input type="number" id="m-price" class="form-control" value="${oldVal ? (oldVal.price || 0) : ''}"></div>
-                <div class="form-group"><label>庫存量</label><input type="number" id="m-stock" class="form-control" value="${oldVal ? (oldVal.stock || 0) : ''}"></div>
-                <div class="form-group"><label>單位</label><input type="text" id="m-unit" class="form-control" placeholder="例：件、雙、個" value="${oldVal ? (oldVal.unit || '') : ''}"></div>
-                <div class="form-group"><label>供應商ID</label><input type="text" id="m-supplier-id" class="form-control" value="${oldVal ? (oldVal.supplier_id || '') : ''}"></div>
+                <div class="form-group"><label>庫存量</label><input type="number" id="m-stock" class="form-control" value="${oldVal ? (oldVal.stock || 0) : '0'}"></div>
             `;
             
             postRender = () => {
@@ -1525,16 +1598,17 @@ const app = {
                 const isCustom = inp.style.display !== 'none';
                 const category = isCustom ? inp.value.trim() : sel.value;
                 
-                const cost = Number(document.getElementById('m-cost').value || 0);
                 const price = Number(document.getElementById('m-price').value || 0);
                 const stock = Number(document.getElementById('m-stock').value || 0);
-                const unit = document.getElementById('m-unit').value;
-                const supplier_id = document.getElementById('m-supplier-id').value;
 
                 if (!id) { await this.alert('請輸入產品代碼'); return false; }
 
                 const currentOldVal = await db.products.get(id);
                 const currentIsEdit = !!currentOldVal;
+
+                const cost = currentOldVal ? (currentOldVal.cost || 0) : 0;
+                const unit = currentOldVal ? (currentOldVal.unit || '') : '';
+                const supplier_id = currentOldVal ? (currentOldVal.supplier_id || '') : '';
 
                 const productData = { id, name, category, cost, price, stock, unit, supplier_id };
                 await DB.save('products', productData);
@@ -2420,6 +2494,18 @@ const app = {
         const ss = String(now.getSeconds()).padStart(2, '0');
         const ms = String(now.getMilliseconds()).padStart(3, '0');
         return `${prefix}${y}${m}${d}${hh}${mm}${ss}${ms}`;
+    },
+
+    async generateProductSequenceID() {
+        const keys = await db.products.toCollection().primaryKeys();
+        const cleanKeys = keys.map(k => String(k).split('-')[0]);
+        const pattern = /^\d+$/;
+        const nums = cleanKeys
+            .filter(k => pattern.test(k))
+            .map(k => parseInt(k, 10));
+        const maxNum = nums.length > 0 ? Math.max(...nums) : 0;
+        const nextNum = maxNum + 1;
+        return String(nextNum).padStart(7, '0');
     }
 };
 
